@@ -7,6 +7,16 @@ def interpret(snapshot) -> str:
         return "Insufficient data."
 
     if (
+    r.get("avg_risk", 0) < 1
+    and o.get("dominant_phase") == "OVERCOMPRESSED"
+    and v.get("vbi_state") == "HOT"
+):
+    return (
+        "Latent tension: structural compression with elevated "
+        "volatility expectations, but no active crowd stress yet."
+    )
+
+    if (
         r.get("avg_risk", 0) >= 2
         and o.get("dominant_phase") == "OVERCOMPRESSED"
         and v.get("vbi_state") == "HOT"
