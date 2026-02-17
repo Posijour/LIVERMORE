@@ -18,9 +18,11 @@ class SupabaseClient:
                 headers={
                     "apikey": SUPABASE_KEY,
                     "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "Prefer": "count=exact",
                 },
                 params=[
                     ("event", f"eq.{event}"),
+                    ("and", f"(ts.gte.{ts_from},ts.lte.{ts_to})"),
                     ("ts", f"gte.{ts_from}"),
                     ("ts", f"lte.{ts_to}"),
                     ("order", "ts.asc"),
@@ -34,10 +36,19 @@ class SupabaseClient:
             page = r.json()
             rows.extend(page)
 
-            if len(page) < self.PAGE_SIZE:
+            content_range = r.headers.get("Content-Range", "")
+            total = None
+            if "/" in content_range:
+                _, total_part = content_range.split("/", 1)
+                if total_part.isdigit():
+                    total = int(total_part)
+
+            if total is not None:
+                if offset + len(page) >= total:
+                    break
+            elif len(page) < self.PAGE_SIZE:
                 break
 
             offset += self.PAGE_SIZE
 
         return rows
-
