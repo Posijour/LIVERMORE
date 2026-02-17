@@ -50,19 +50,24 @@ def parse_args():
 
 if __name__ == "__main__":
     from time_utils import parse_window
+    from trend.state_evolution import analyze_state_evolution
+    from output.console import print_state_evolution
 
     snap_12h = run_snapshot(*parse_window("12h"))
     snap_6h = run_snapshot(*parse_window("6h"))
     snap_1h = run_snapshot(*parse_window("1h"))
 
-    print("\n=== SNAPSHOTS ===")
-    print("12h:", snap_12h.interpretation)
-    print("6h :", snap_6h.interpretation)
-    print("1h :", snap_1h.interpretation)
+    analysis = analyze_state_evolution([
+        ("12h", snap_12h),
+        ("6h", snap_6h),
+        ("1h", snap_1h),
+    ])
 
-    trend = analyze_direction([snap_12h, snap_6h, snap_1h])
+    print_state_evolution(
+        analysis["windows"],
+        analysis["metrics"],
+        analysis["changes"],
+        analysis["conclusion"],
+    )
 
-    print("\n=== MARKET DIRECTION ===")
-    print(trend["summary"])
-    print("Details:", trend["direction"])
 
