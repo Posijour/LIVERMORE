@@ -11,10 +11,16 @@ class SupabaseClient:
         ts = row.get("ts")
 
         if ts is None and isinstance(row.get("data"), dict):
-            ts = row["data"].get("ts")
+            data = row["data"]
+            ts = (
+                data.get("ts")
+                or data.get("timestamp")
+                or data.get("time")
+                or data.get("created_at")
+            )
 
         if ts is None:
-            ts = row.get("created_at")
+            ts = row.get("created_at") or row.get("timestamp") or row.get("time")
 
         if isinstance(ts, (int, float)):
             value = int(ts)
@@ -41,7 +47,8 @@ class SupabaseClient:
         for row in rows:
             row_ts = self._row_ts_ms(row)
             if row_ts is None:
-                filtered.append(row)
+                # Strict mode: rows without a parsable timestamp are excluded,
+                # otherwise different windows can collapse to the same dataset.
                 continue
             if ts_from <= row_ts <= ts_to:
                 filtered.append(row)
@@ -51,7 +58,6 @@ class SupabaseClient:
     def fetch(self, event: str, ts_from: int, ts_to: int) -> list[dict]:
         if not SUPABASE_URL or not SUPABASE_KEY:
             raise RuntimeError("Supabase credentials not set")
-
         rows: list[dict] = []
         offset = 0
 
