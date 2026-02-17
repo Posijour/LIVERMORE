@@ -1,6 +1,7 @@
 import requests
 from config import SUPABASE_URL, SUPABASE_KEY
 
+
 class SupabaseClient:
     PAGE_SIZE = 1000
     
@@ -18,13 +19,14 @@ class SupabaseClient:
                     "apikey": SUPABASE_KEY,
                     "Authorization": f"Bearer {SUPABASE_KEY}",
                 },
-                params={
-                    "event": f"eq.{event}",
-                    "and": f"(ts.gte.{ts_from},ts.lte.{ts_to})",
-                    "order": "ts.asc",
-                    "limit": self.PAGE_SIZE,
-                    "offset": offset,
-                },
+                params=[
+                    ("event", f"eq.{event}"),
+                    ("ts", f"gte.{ts_from}"),
+                    ("ts", f"lte.{ts_to}"),
+                    ("order", "ts.asc"),
+                    ("limit", str(self.PAGE_SIZE)),
+                    ("offset", str(offset)),
+                ],
                 timeout=10,
             )
             r.raise_for_status()
@@ -38,3 +40,4 @@ class SupabaseClient:
             offset += self.PAGE_SIZE
 
         return rows
+
