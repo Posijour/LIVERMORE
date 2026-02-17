@@ -1,5 +1,11 @@
 from collections import Counter
 
+def avg(values, digits: int):
+    numeric = [v for v in values if isinstance(v, (int, float))]
+    if not numeric:
+        return 0
+    return round(sum(numeric) / len(numeric), digits)
+
 def dominant(values):
     if not values:
         return None, 0.0
@@ -21,7 +27,7 @@ def aggregate_options(rows: list[dict]) -> dict:
     return {
         "dominant_phase": phase,
         "dominant_phase_pct": pct,
-        "mci_avg": round(sum(d.get("mci", 0) for d in data) / len(data), 2),
-        "mci_slope": round(sum(d.get("mci_slope", 0) for d in data) / len(data), 3),
+        "mci_avg": avg((d.get("mci") for d in data), 2),
+        "mci_slope": avg((d.get("mci_slope") for d in data), 3),
         "phase_divergence": any(d.get("phase_divergence") for d in data),
     }
