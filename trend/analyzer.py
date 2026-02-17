@@ -1,4 +1,4 @@
-def sign(x: float, eps: float = 0.01) -> str:
+def sign(x, eps):
     if x > eps:
         return "UP"
     if x < -eps:
@@ -11,10 +11,10 @@ def compare_metrics(old: dict, new: dict) -> dict:
     old → new
     """
     return {
-        "risk": sign(new["avg_risk"] - old["avg_risk"]),
-        "risk_activity": sign(new["risk_activity"] - old["risk_activity"]),
-        "structure": sign(new["structure_pct"] - old["structure_pct"]),
-        "vol": sign(new["iv_slope"] - old["iv_slope"]),
+        "risk": sign(new["avg_risk"] - old["avg_risk"], eps=0.05),
+        "risk_activity": sign(new["risk_activity"] - old["risk_activity"], eps=1.0),
+        "structure": sign(new["structure_pct"] - old["structure_pct"], eps=2.0),
+        "vol": sign(new["iv_slope"] - old["iv_slope"], eps=0.5),
     }
 
 
@@ -58,10 +58,11 @@ def analyze_direction(snapshots: list) -> dict:
     narrative = []
 
     if (
-        direction["risk"] == "DOWN"
-        and direction["vol"] == "DOWN"
+        direction["vol"] == "DOWN"
         and direction["structure"] == "DOWN"
+        and direction["risk_activity"] == "DOWN"
     ):
+
         narrative.append(
             "Previous market tension is dissipating across risk, structure, and volatility."
         )
