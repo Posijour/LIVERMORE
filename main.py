@@ -10,6 +10,7 @@ from interpretation.engine import interpret
 from interpretation.states import detect_states
 from models.snapshot import MarketSnapshot
 from time_utils import parse_datetime, parse_window
+from trend.analyzer import analyze_direction
 
 
 def run_snapshot(ts_from, ts_to):
@@ -48,15 +49,20 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    args = parse_args()
+    from time_utils import parse_window
 
-    if args.from_dt and args.to_dt:
-        ts_from = parse_datetime(args.from_dt)
-        ts_to = parse_datetime(args.to_dt)
-    else:
-        ts_from, ts_to = parse_window(args.window)
+    snap_12h = run_snapshot(*parse_window("12h"))
+    snap_6h = run_snapshot(*parse_window("6h"))
+    snap_1h = run_snapshot(*parse_window("1h"))
 
-    snap = run_snapshot(ts_from, ts_to)
+    print("\n=== SNAPSHOTS ===")
+    print("12h:", snap_12h.interpretation)
+    print("6h :", snap_6h.interpretation)
+    print("1h :", snap_1h.interpretation)
 
-    print("=== MARKET SNAPSHOT ===")
-    print(snap)
+    trend = analyze_direction([snap_12h, snap_6h, snap_1h])
+
+    print("\n=== MARKET DIRECTION ===")
+    print(trend["summary"])
+    print("Details:", trend["direction"])
+
