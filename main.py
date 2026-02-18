@@ -11,6 +11,22 @@ from interpretation.states import detect_states
 from models.snapshot import MarketSnapshot
 from time_utils import parse_datetime, parse_window
 from trend.analyzer import analyze_direction
+from data.queries import load_divergence
+
+divergence = load_divergence(ts_from, ts_to)
+
+def aggregate_divergence(rows, risk_rows):
+    if not rows:
+        return {}
+
+    return {
+        "count": len(rows),
+        "share": round(len(rows) / len(risk_rows) * 100, 1) if risk_rows else 0.0,
+        "dominant_type": rows[0]["data"].get("divergence_type"),
+        "confidence_avg": round(
+            sum(r["data"].get("confidence", 0) for r in rows) / len(rows), 2
+        ),
+    }
 
 
 def run_snapshot(ts_from, ts_to):
@@ -25,6 +41,8 @@ def run_snapshot(ts_from, ts_to):
 
     snapshot.interpretation = interpret(snapshot)
     snapshot.active_states = detect_states(snapshot)
+    snapshot.divergence = aggregate_divergence(div_rows, risk_rows)
+
 
     return snapshot
 
@@ -69,5 +87,4 @@ if __name__ == "__main__":
         analysis["changes"],
         analysis["conclusion"],
     )
-
 
