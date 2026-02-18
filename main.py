@@ -13,7 +13,6 @@ from time_utils import parse_datetime, parse_window
 from trend.analyzer import analyze_direction
 from data.queries import load_divergence
 
-divergence = load_divergence(ts_from, ts_to)
 
 def aggregate_divergence(rows, risk_rows):
     if not rows:
@@ -30,10 +29,13 @@ def aggregate_divergence(rows, risk_rows):
 
 
 def run_snapshot(ts_from, ts_to):
+    risk_rows = load_risk(ts_from, ts_to)
+    div_rows = load_divergence(ts_from, ts_to)
+
     snapshot = MarketSnapshot(
         ts_from=ts_from,
         ts_to=ts_to,
-        risk=aggregate_risk(load_risk(ts_from, ts_to)),
+        risk=aggregate_risk(risk_rows),
         options=aggregate_options(load_options(ts_from, ts_to)),
         deribit=aggregate_deribit(load_deribit(ts_from, ts_to)),
         meta=aggregate_meta(load_meta(ts_from, ts_to)),
@@ -42,7 +44,6 @@ def run_snapshot(ts_from, ts_to):
     snapshot.interpretation = interpret(snapshot)
     snapshot.active_states = detect_states(snapshot)
     snapshot.divergence = aggregate_divergence(div_rows, risk_rows)
-
 
     return snapshot
 
@@ -87,4 +88,3 @@ if __name__ == "__main__":
         analysis["changes"],
         analysis["conclusion"],
     )
-
