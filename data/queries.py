@@ -13,3 +13,6 @@ def load_deribit(ts_from, ts_to):
 
 def load_meta(ts_from, ts_to):
     return client.fetch("market_regime", ts_from, ts_to)
+
+def load_divergence(ts_from, ts_to):
+    return client.fetch("risk_divergence", ts_from, ts_to)
