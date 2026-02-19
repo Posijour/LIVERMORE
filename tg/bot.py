@@ -23,7 +23,34 @@ ALERT_COOLDOWN = 30 * 60  # 30 минут
 
 # ---------------- CONFIG ----------------
 
-TELEGRAM_TOKEN = "**********************"
+TELEGRAM_TOKEN = "8473159744:AAFokOIhOXg9O9qzPYwtTYkdGcROddbToaQ"
+
+
+SUPPORTED_TICKERS = {
+    "BTCUSDT",
+    "ETHUSDT",
+    "XRPUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "TRXUSDT",
+    "DOGEUSDT",
+    "BCHUSDT",
+    "ADAUSDT",
+    "HYPEUSDT",
+    "XMRUSDT",
+    "LINKUSDT",
+    "XLMUSDT",
+    "LTCUSDT",
+    "HBARUSDT",
+    "ZECUSDT",
+}
+
+
+def normalize_ticker(raw: str) -> str:
+    ticker = raw.strip().upper()
+    if not ticker.endswith("USDT"):
+        ticker = f"{ticker}USDT"
+    return ticker
 
 
 # ---------------- HELPERS ----------------
@@ -241,10 +268,14 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Usage: /status BTC")
+        await update.message.reply_text("Usage: /status BTCUSDT")
         return
 
-    symbol = context.args[0].upper()
+    symbol = normalize_ticker(context.args[0])
+    if symbol not in SUPPORTED_TICKERS:
+        await update.message.reply_text("unknown ticker")
+        return
+
     windows = ["12h", "6h", "1h"]
 
     text = f"=== STATUS: {symbol} ===\n\n"
