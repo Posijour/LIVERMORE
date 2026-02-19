@@ -47,16 +47,16 @@ def aggregate_alert_divergence(rows):
 
 
 def run_snapshot(ts_from, ts_to, symbol: Optional[str] = None):
-    risk_rows = load_risk(ts_from, ts_to)
-    div_rows = load_divergence(ts_from, ts_to)
+    risk_rows = load_risk(ts_from, ts_to, symbol=symbol)
+    div_rows = load_divergence(ts_from, ts_to, symbol=symbol)
 
     snapshot = MarketSnapshot(
         ts_from=ts_from,
         ts_to=ts_to,
         risk=aggregate_risk(risk_rows),
-        options=aggregate_options(load_options(ts_from, ts_to)),
-        deribit=aggregate_deribit(load_deribit(ts_from, ts_to)),
-        meta=aggregate_meta(load_meta(ts_from, ts_to)),
+        options=aggregate_options(load_options(ts_from, ts_to, symbol=symbol)),
+        deribit=aggregate_deribit(load_deribit(ts_from, ts_to, symbol=symbol)),
+        meta=aggregate_meta(load_meta(ts_from, ts_to, symbol=symbol)),
     )
 
     snapshot.interpretation = interpret(snapshot)
