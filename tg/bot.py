@@ -23,7 +23,7 @@ ALERT_COOLDOWN = 30 * 60  # 30 минут
 
 # ---------------- CONFIG ----------------
 
-TELEGRAM_TOKEN = "8473159744:AAFokOIhOXg9O9qzPYwtTYkdGcROddbToaQ"
+TELEGRAM_TOKEN = "**********************"
 
 
 # ---------------- HELPERS ----------------
