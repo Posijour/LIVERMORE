@@ -55,7 +55,50 @@ class SupabaseClient:
 
         return filtered
 
-    def fetch(self, event: str, ts_from: int, ts_to: int) -> list[dict]:
+    def _normalize_symbol(self, symbol: str) -> str:
+        separators = ("-", "_", "/", ":")
+        value = symbol.upper()
+
+        for sep in separators:
+            value = value.split(sep, 1)[0]
+
+        for quote in ("USDT", "USD", "PERP"):
+            if value.endswith(quote):
+                return value[: -len(quote)]
+
+        return value
+
+    def _row_symbol(self, row: dict) -> str | None:
+        if isinstance(row.get("symbol"), str):
+            return row["symbol"]
+
+        data = row.get("data")
+        if isinstance(data, dict) and isinstance(data.get("symbol"), str):
+            return data["symbol"]
+
+        return None
+
+    def _filter_by_symbol(self, rows: list[dict], symbol: str | None) -> list[dict]:
+        if not symbol:
+            return rows
+
+        normalized_symbol = self._normalize_symbol(symbol)
+        filtered: list[dict] = []
+
+        for row in rows:
+            row_symbol = self._row_symbol(row)
+            if row_symbol is None:
+                # Keep rows without symbol (global market metrics) to avoid
+                # empty snapshots when only part of the pipeline is symbolized.
+                filtered.append(row)
+                continue
+
+            if self._normalize_symbol(row_symbol) == normalized_symbol:
+                filtered.append(row)
+
+        return filtered
+
+    def fetch(self, event: str, ts_from: int, ts_to: int, symbol: str | None = None) -> list[dict]:
         if not SUPABASE_URL or not SUPABASE_KEY:
             raise RuntimeError("Supabase credentials not set")
         rows: list[dict] = []
@@ -98,4 +141,5 @@ class SupabaseClient:
 
             offset += self.PAGE_SIZE
 
-        return self._filter_by_window(rows, ts_from, ts_to)
+        rows = self._filter_by_window(rows, ts_from, ts_to)
+        return self._filter_by_symbol(rows, symbol)
