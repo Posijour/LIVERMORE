@@ -1,5 +1,7 @@
+
 import argparse
 
+from typing import Optional
 from aggregation.deribit import aggregate_deribit
 from aggregation.meta import aggregate_meta
 from aggregation.options import aggregate_options
@@ -27,8 +29,24 @@ def aggregate_divergence(rows, risk_rows):
         ),
     }
 
+def aggregate_alert_divergence(rows):
+    alerts = {}
 
-def run_snapshot(ts_from, ts_to):
+    for r in rows:
+        data = r.get("data", {})
+        symbol = data.get("symbol")
+        div_type = data.get("divergence_type")
+
+        if not symbol or not div_type:
+            continue
+
+        key = (symbol, div_type)
+        alerts[key] = alerts.get(key, 0) + 1
+
+    return alerts
+
+
+def run_snapshot(ts_from, ts_to, symbol: Optional[str] = None):
     risk_rows = load_risk(ts_from, ts_to)
     div_rows = load_divergence(ts_from, ts_to)
 
