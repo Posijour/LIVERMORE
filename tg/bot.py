@@ -1,5 +1,6 @@
 import time
 import asyncio
+from config import DATA_SCOPE
 from typing import Optional
 from trend.event_anchored import event_anchored_analysis
 from time_utils import parse_window
@@ -264,7 +265,9 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(
-        text + "Interpretation available in Risk Log channel."
+        text
+        + "Interpretation available in Risk Log channel.\n\n"
+        + format_scope()
     )
 
 
@@ -295,7 +298,9 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for s in snap.active_states:
             text += f"• {s}\n"
 
-    await update.message.reply_text(text)
+    await update.message.reply_text(
+        text + "\n" + format_scope()
+    )
 
 
 def snapshot_status_text(snap):
@@ -377,6 +382,14 @@ async def context(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Market context is published daily\n"
         "in the Risk Log channel."
     )
+
+def format_scope():
+    lines = ["Scope:"]
+    lines.append(f"• Futures: {DATA_SCOPE['futures']}")
+    lines.append(f"• Options: {DATA_SCOPE['options']}")
+    lines.append(f"• Vol: {DATA_SCOPE['vol']}")
+    return "\n".join(lines)
+
 
 # ---------------- RUN ----------------
 
