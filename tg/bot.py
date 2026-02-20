@@ -1,5 +1,6 @@
-import time
 import asyncio
+import logging
+import time
 from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
 from typing import Optional
@@ -212,58 +213,56 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "=== EVENT ANCHORED ANALYSIS ===\n\n"
     text += f"Event:\n{symbol} — {div_type}\n\n"
 
-    def fmt(title, snap):
+    # ---------- TICKER (FUTURES) ----------
+    text += "[Ticker (Futures)]\n"
+
+    def fmt_ticker(title, snap):
         r = snap.risk or {}
-        o = snap.options or {}
-        v = snap.deribit or {}
         d = getattr(snap, "divergence", {}) or {}
-    
+
         return (
             f"--- {title} ---\n"
             f"Risk: {r.get('avg_risk', 0):.2f} | "
-            f"RiskAct: {r.get('risk_2plus_pct', 0):.1f}%\n"
-            f"Struct: {o.get('dominant_phase')} "
-            f"({o.get('dominant_phase_pct', 0)}%)\n"
-            f"Vol: {v.get('vbi_state')} "
-            f"({v.get('iv_slope_avg', 0):+.2f})\n"
+            f"RiskAct: {r.get('risk_2plus_pct', 0):.1f}% | "
             f"Divs: {d.get('count', 0)}\n\n"
         )
 
-    def fmt_after_with_delta(after, before):
-        ra = after.risk or {}
-        rb = before.risk or {}
-    
-        va = after.deribit or {}
-        vb = before.deribit or {}
-    
-        da = getattr(after, "divergence", {}) or {}
-        db = getattr(before, "divergence", {}) or {}
-    
-        def d(x, y):
-            return x - y
-    
+    text += fmt_ticker("BEFORE", snaps["before"])
+    text += fmt_ticker("DURING", snaps["during"])
+    text += fmt_ticker("AFTER", snaps["after"])
+
+    # ---------- DELTAS (TICKER ONLY) ----------
+    ra = snaps["after"].risk or {}
+    rb = snaps["before"].risk or {}
+
+    da = getattr(snaps["after"], "divergence", {}) or {}
+    db = getattr(snaps["before"], "divergence", {}) or {}
+
+    text += "Δ vs BEFORE:\n"
+    text += (
+        f"Risk: {ra.get('avg_risk', 0) - rb.get('avg_risk', 0):+.2f}\n"
+        f"RiskAct: {ra.get('risk_2plus_pct', 0) - rb.get('risk_2plus_pct', 0):+.1f}%\n"
+        f"Divs: {da.get('count', 0) - db.get('count', 0):+}\n\n"
+    )
+
+    # ---------- MARKET CONTEXT (BTC / ETH) ----------
+    text += "[Market context (BTC / ETH)]\n"
+
+    def fmt_market(title, snap):
+        o = snap.options or {}
+        v = snap.deribit or {}
+
         return (
-            "--- AFTER ---\n"
-            f"Risk: {ra.get('avg_risk', 0):.2f} | "
-            f"RiskAct: {ra.get('risk_2plus_pct', 0):.1f}%\n"
-            f"Struct: {after.options.get('dominant_phase')} "
-            f"({after.options.get('dominant_phase_pct', 0)}%)\n"
-            f"Vol: {va.get('vbi_state')} "
-            f"({va.get('iv_slope_avg', 0):+.2f})\n"
-            f"Divs: {da.get('count', 0)}\n\n"
-            "Δ vs BEFORE:\n"
-            f"Risk: {ra.get('avg_risk', 0) - rb.get('avg_risk', 0):+.2f}\n"
-            f"RiskAct: {ra.get('risk_2plus_pct', 0) - rb.get('risk_2plus_pct', 0):+.1f}%\n"
-            f"Vol: {va.get('iv_slope_avg', 0) - vb.get('iv_slope_avg', 0):+.2f}\n"
-            f"Divs: {da.get('count', 0) - db.get('count', 0):+}\n\n"
+            f"--- {title} ---\n"
+            f"Struct: {o.get('dominant_phase')} "
+            f"({o.get('dominant_phase_pct', 0)}%)\n"
+            f"Vol: {v.get('vbi_state')} "
+            f"({v.get('iv_slope_avg', 0):+.2f})\n\n"
         )
 
-    text += fmt("BEFORE", snaps["before"])
-    text += fmt("DURING", snaps["during"])
-    text += fmt_after_with_delta(
-        snaps["after"],
-        snaps["before"],
-    )
+    text += fmt_market("BEFORE", snaps["before"])
+    text += fmt_market("DURING", snaps["during"])
+    text += fmt_market("AFTER", snaps["after"])
 
     await update.message.reply_text(
         text
@@ -346,42 +345,49 @@ async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
+logger = logging.getLogger(__name__)
+
+
 async def divergence_watcher(app):
     from data.queries import load_divergence
     from time_utils import parse_window
 
-    while True:
-        try:
-            ts_from, ts_to = parse_window("2h")
-            rows = load_divergence(ts_from, ts_to)
+    ts_from, ts_to = parse_window("2h")
+    rows = load_divergence(ts_from, ts_to)
 
-            for r in rows:
-                data = r.get("data", {})
-                symbol = data.get("symbol")
-                div_type = data.get("divergence_type")
-                event_ts = r.get("ts") or r.get("created_at")
+    for r in rows:
+        data = r.get("data", {})
+        symbol = data.get("symbol")
+        div_type = data.get("divergence_type")
+        event_ts = r.get("ts") or r.get("created_at")
 
-                if not symbol or not div_type:
-                    continue
+        if not symbol or not div_type:
+            continue
 
-                if not can_send_alert(symbol, div_type, event_ts):
-                    continue
+        if not can_send_alert(symbol, div_type, event_ts):
+            continue
 
-                text = (
-                    "⚠️ Divergence detected\n"
-                    f"{symbol} — {div_type}"
-                )
+        text = (
+            "⚠️ Divergence detected\n"
+            f"{symbol} — {div_type}"
+        )
 
-                # ❗️ ВСТАВЬ СВОЙ CHAT_ID
-                await app.bot.send_message(
-                    chat_id=766363011,
-                    text=text
-                )
+        # ❗️ ВСТАВЬ СВОЙ CHAT_ID
+        await app.bot.send_message(
+            chat_id=766363011,
+            text=text
+        )
 
-        except Exception as e:
-            print("Watcher error:", e)
 
-        await asyncio.sleep(120)  # 2 минуты
+async def divergence_watcher_job(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await divergence_watcher(context.application)
+    except Exception:
+        logger.exception("Watcher error")
+
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.exception("Telegram update handling failed", exc_info=context.error)
 
 async def context(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -400,6 +406,11 @@ def format_scope():
 # ---------------- RUN ----------------
 
 def run_bot():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -410,10 +421,12 @@ def run_bot():
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("context", context))
     app.add_handler(CommandHandler("dispersion", dispersion))
+    app.add_error_handler(on_error)
+
 
     # ✅ правильный запуск фонового watcher
     app.job_queue.run_repeating(
-        lambda _: divergence_watcher(app),
+        divergence_watcher_job,
         interval=120,
         first=10,
     )
@@ -422,3 +435,4 @@ def run_bot():
     app.run_polling()
 
     print("Telegram bot polling stopped.", flush=True)
+
