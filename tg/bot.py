@@ -1,10 +1,8 @@
 import asyncio
 import logging
-import time
 from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
-from typing import Optional
 from trend.event_anchored import event_anchored_analysis
 from time_utils import parse_window
 from data.queries import load_divergence
@@ -16,9 +14,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from main import run_snapshot
 from trend.state_evolution import analyze_state_evolution
-from output.console import print_state_evolution
 
 MAX_TELEGRAM_TEXT_LEN = 4000
 
@@ -121,6 +117,18 @@ async def safe_reply(update: Update, text: str):
             raise
 
 
+async def run_data_task(update: Update, task_name: str, fn, *args, **kwargs):
+    try:
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    except RuntimeError as exc:
+        logger.warning("%s failed: %s", task_name, exc)
+        await safe_reply(update, "Data source timeout. Try again in 1-2 minutes.")
+    except Exception:
+        logger.exception("%s failed", task_name)
+        await safe_reply(update, "Temporary data processing error. Try again in 1-2 minutes.")
+    return None
+
+
 # ---------------- COMMANDS ----------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -153,7 +161,9 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(args) == 1:
         window = args[0]
         ts_from, ts_to = parse_window(window)
-        snap = run_snapshot(ts_from, ts_to)
+        snap = await run_data_task(update, "stats snapshot", run_snapshot, ts_from, ts_to)
+        if snap is None:
+            return
 
         await safe_reply(
             update,
@@ -161,12 +171,16 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             + snapshot_to_text(snap)
             + "\n\nInterpretation available in Risk Log channel."
         )
+        return
 
     # -------- MULTI WINDOW (STATE EVOLUTION) --------
     snapshots = []
     for w in args:
         ts_from, ts_to = parse_window(w)
-        snapshots.append((w, run_snapshot(ts_from, ts_to)))
+        snap = await run_data_task(update, f"state snapshot {w}", run_snapshot, ts_from, ts_to)
+        if snap is None:
+            return
+        snapshots.append((w, snap))
 
     analysis = analyze_state_evolution(snapshots)
 
@@ -186,7 +200,9 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # -------- ACTIVE STATES (1h) --------
     ts_from, ts_to = parse_window("1h")
-    snap = run_snapshot(ts_from, ts_to)
+    snap = await run_data_task(update, "alerts snapshot", run_snapshot, ts_from, ts_to)
+    if snap is None:
+        return
 
     text = "=== ACTIVE STATES ===\n"
 
@@ -198,7 +214,9 @@ async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # -------- RECENT DIVERGENCES (2h) --------
     ts_from, ts_to = parse_window("2h")
-    div_rows = load_divergence(ts_from, ts_to)
+    div_rows = await run_data_task(update, "alerts divergence", load_divergence, ts_from, ts_to)
+    if div_rows is None:
+        return
 
     text += "\n=== RECENT DIVERGENCES (last 2h) ===\n"
 
@@ -237,7 +255,9 @@ def can_send_alert(symbol, div_type, event_ts):
 async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. Берём последнюю дивергенцию
     ts_from, ts_to = parse_window("4h")
-    rows = load_divergence(ts_from, ts_to)
+    rows = await run_data_task(update, "event divergence", load_divergence, ts_from, ts_to)
+    if rows is None:
+        return
 
     if not rows:
         await safe_reply(update, "No recent events found.")
@@ -253,7 +273,9 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_reply(update, "Event timestamp missing.")
         return
 
-    snaps = event_anchored_analysis(event_ts)
+    snaps = await run_data_task(update, "event analysis", event_anchored_analysis, event_ts)
+    if snaps is None:
+        return
 
     text = "=== EVENT ANCHORED ANALYSIS ===\n\n"
     text += f"Event:\n{symbol} — {div_type}\n\n"
@@ -336,7 +358,9 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for w in windows:
         ts_from, ts_to = parse_window(w)
-        snap = run_snapshot(ts_from, ts_to, symbol=symbol)
+        snap = await run_data_task(update, f"status snapshot {w}", run_snapshot, ts_from, ts_to, symbol=symbol)
+        if snap is None:
+            return
 
         r = snap.risk or {}
         d = getattr(snap, "divergence", {}) or {}
@@ -353,7 +377,9 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for w in windows:
         ts_from, ts_to = parse_window(w)
-        snap = run_snapshot(ts_from, ts_to)  # ⚠️ без symbol → market-wide
+        snap = await run_data_task(update, f"status market snapshot {w}", run_snapshot, ts_from, ts_to)
+        if snap is None:
+            return  # ⚠️ без symbol → market-wide
 
         o = snap.options or {}
         v = snap.deribit or {}
@@ -370,7 +396,9 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = compute_dispersion()
+    data = await run_data_task(update, "dispersion", compute_dispersion)
+    if data is None:
+        return
 
     text = "=== WINDOW DISPERSION ===\n\n"
 
@@ -397,7 +425,7 @@ async def divergence_watcher(app):
     from time_utils import parse_window
 
     ts_from, ts_to = parse_window("2h")
-    rows = load_divergence(ts_from, ts_to)
+    rows = await asyncio.to_thread(load_divergence, ts_from, ts_to)
 
     for r in rows:
         data = r.get("data", {})
