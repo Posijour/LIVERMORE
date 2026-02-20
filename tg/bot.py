@@ -430,6 +430,8 @@ async def divergence_watcher_job(context: ContextTypes.DEFAULT_TYPE):
         logger.warning("Watcher send timeout; will retry on next cycle")
     except NetworkError as exc:
         logger.warning("Watcher network error: %s", exc)
+    except RuntimeError as exc:
+        logger.warning("Watcher data fetch error: %s", exc)
     except Exception:
         logger.exception("Watcher error")
 
@@ -482,3 +484,4 @@ def run_bot():
     app.run_polling()
 
     print("Telegram bot polling stopped.", flush=True)
+
