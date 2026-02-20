@@ -286,59 +286,44 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = f"=== STATUS: {symbol} ===\n\n"
 
+    # ---------- TICKER (FUTURES) ----------
+    text += "[Ticker (Futures)]\n"
+
     for w in windows:
         ts_from, ts_to = parse_window(w)
         snap = run_snapshot(ts_from, ts_to, symbol=symbol)
 
-        text += f"[{w}]\n"
-        text += snapshot_status_text(snap)
-        text += "\n"
+        r = snap.risk or {}
+        d = getattr(snap, "divergence", {}) or {}
 
-    if snap.active_states:
-        text += "\nActive states:\n"
-        for s in snap.active_states:
-            text += f"• {s}\n"
+        text += f"[{w}]\n"
+        text += (
+            f"Risk: {r.get('avg_risk', 0):.2f} | "
+            f"RiskAct: {r.get('risk_2plus_pct', 0):.1f}% | "
+            f"Divs: {d.get('count', 0)}\n"
+        )
+
+    # ---------- MARKET CONTEXT (BTC / ETH) ----------
+    text += "\n[Market context (BTC / ETH)]\n"
+
+    for w in windows:
+        ts_from, ts_to = parse_window(w)
+        snap = run_snapshot(ts_from, ts_to)  # ⚠️ без symbol → market-wide
+
+        o = snap.options or {}
+        v = snap.deribit or {}
+
+        text += f"[{w}]\n"
+        text += (
+            f"Struct: {o.get('dominant_phase')} "
+            f"({o.get('dominant_phase_pct', 0):.1f}%)\n"
+            f"Vol: {v.get('vbi_state')} "
+            f"({v.get('iv_slope_avg', 0):+.2f})\n"
+        )
 
     await update.message.reply_text(
         text + "\n" + format_scope()
     )
-
-
-def snapshot_status_text(snap):
-    r = snap.risk or {}
-    o = snap.options or {}
-    v = snap.deribit or {}
-    d = getattr(snap, "divergence", {}) or {}
-
-    lines = []
-
-    if r:
-        lines.append(
-            f"Risk: {r.get('avg_risk', 0):.2f} | "
-            f"RiskAct: {r.get('risk_2plus_pct', 0):.1f}%"
-        )
-    else:
-        lines.append("Risk: N/A")
-
-    if o:
-        lines.append(
-            f"Struct: {o.get('dominant_phase')} "
-            f"({o.get('dominant_phase_pct', 0)}%)"
-        )
-    else:
-        lines.append("Struct: N/A")
-
-    if v:
-        lines.append(
-            f"Vol: {v.get('vbi_state')} "
-            f"({v.get('iv_slope_avg', 0):+.2f})"
-        )
-    else:
-        lines.append("Vol: N/A")
-
-    lines.append(f"Divs: {d.get('count', 0)}")
-
-    return "\n".join(lines) + "\n"
 
 
 async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -435,4 +420,5 @@ def run_bot():
 
     print("Telegram bot running...", flush=True)
     app.run_polling()
+
     print("Telegram bot polling stopped.", flush=True)
