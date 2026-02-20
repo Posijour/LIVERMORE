@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 from json import loads
+import socket
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -9,6 +11,9 @@ from config import SUPABASE_URL, SUPABASE_KEY
 
 class SupabaseClient:
     PAGE_SIZE = 1000
+    REQUEST_TIMEOUT_SECONDS = 10
+    MAX_RETRIES = 3
+    RETRY_BACKOFF_SECONDS = 1.5
 
     def _row_ts_ms(self, row: dict) -> int | None:
         ts = row.get("ts")
@@ -123,17 +128,23 @@ class SupabaseClient:
             method="GET",
         )
 
-        try:
-            with urlopen(req, timeout=10) as response:
-                raw = response.read().decode("utf-8")
-                page = loads(raw)
-                content_range = response.headers.get("Content-Range", "")
-                return page, content_range
-        except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-            raise RuntimeError(f"Supabase HTTP error {exc.code}: {detail}") from exc
-        except URLError as exc:
-            raise RuntimeError(f"Supabase connection error: {exc.reason}") from exc
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                with urlopen(req, timeout=self.REQUEST_TIMEOUT_SECONDS) as response:
+                    raw = response.read().decode("utf-8")
+                    page = loads(raw)
+                    content_range = response.headers.get("Content-Range", "")
+                    return page, content_range
+            except HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+                raise RuntimeError(f"Supabase HTTP error {exc.code}: {detail}") from exc
+            except (TimeoutError, socket.timeout, URLError) as exc:
+                if attempt == self.MAX_RETRIES:
+                    reason = getattr(exc, "reason", exc)
+                    raise RuntimeError(f"Supabase connection error: {reason}") from exc
+                time.sleep(self.RETRY_BACKOFF_SECONDS * attempt)
+
+        raise RuntimeError("Supabase connection error: exhausted retries")
 
     def fetch(self, event: str, ts_from: int, ts_to: int, symbol: str | None = None) -> list[dict]:
         if not SUPABASE_URL or not SUPABASE_KEY:
