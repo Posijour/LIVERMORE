@@ -1,6 +1,8 @@
 from aggregation.risk import aggregate_risk
 from aggregation.options import aggregate_options
 from aggregation.deribit import aggregate_deribit
+from data.queries import load_deribit, load_options, load_risk
+from time_utils import parse_window
 
 
 RISK_THRESHOLDS = {
@@ -35,9 +37,11 @@ def compute_dispersion():
     vol_vals = {}
 
     for w in windows:
-        risk = aggregate_risk(w)
-        options = aggregate_options(w)
-        deribit = aggregate_deribit(w)
+        ts_from, ts_to = parse_window(w)
+
+        risk = aggregate_risk(load_risk(ts_from, ts_to))
+        options = aggregate_options(load_options(ts_from, ts_to))
+        deribit = aggregate_deribit(load_deribit(ts_from, ts_to))
 
         if risk:
             risk_vals[w] = risk.get("avg_risk")
