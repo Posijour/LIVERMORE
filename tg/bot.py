@@ -1,6 +1,7 @@
 import time
 import asyncio
 from config import DATA_SCOPE
+from trend.dispersion import compute_dispersion
 from typing import Optional
 from trend.event_anchored import event_anchored_analysis
 from time_utils import parse_window
@@ -340,6 +341,26 @@ def snapshot_status_text(snap):
     return "\n".join(lines) + "\n"
 
 
+async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = compute_dispersion()
+
+    text = "=== WINDOW DISPERSION ===\n\n"
+
+    text += "Risk (multi-symbol):\n"
+    text += f"12h ↔ 1h: {data['risk']['12h_1h']}\n"
+    text += f"6h  ↔ 1h: {data['risk']['6h_1h']}\n\n"
+
+    text += "Structure (BTC / ETH):\n"
+    text += f"12h ↔ 1h: {data['structure']['12h_1h']}\n"
+    text += f"6h  ↔ 1h: {data['structure']['6h_1h']}\n\n"
+
+    text += "Volatility (BTC / ETH):\n"
+    text += f"12h ↔ 1h: {data['volatility']['12h_1h']}\n"
+    text += f"6h  ↔ 1h: {data['volatility']['6h_1h']}"
+
+    await update.message.reply_text(text)
+
+
 async def divergence_watcher(app):
     from data.queries import load_divergence
     from time_utils import parse_window
@@ -403,6 +424,7 @@ def run_bot():
     app.add_handler(CommandHandler("event", event))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("context", context))
+    app.add_handler(CommandHandler("dispersion", dispersion))
 
     # ✅ правильный запуск фонового watcher
     app.job_queue.run_repeating(
