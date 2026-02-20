@@ -398,5 +398,6 @@ def run_bot():
         first=10,
     )
 
-    print("Telegram bot running...")
+    print("Telegram bot running...", flush=True)
     app.run_polling()
+    print("Telegram bot polling stopped.", flush=True
