@@ -129,6 +129,28 @@ async def run_data_task(update: Update, task_name: str, fn, *args, **kwargs):
     return None
 
 
+async def collect_snapshots(update: Update, task_name: str, windows: list[str], symbol: str | None = None):
+    ranges = [(w, *parse_window(w)) for w in windows]
+
+    try:
+        snaps = await asyncio.gather(
+            *[
+                asyncio.to_thread(run_snapshot, ts_from, ts_to, symbol=symbol)
+                for _, ts_from, ts_to in ranges
+            ]
+        )
+    except RuntimeError as exc:
+        logger.warning("%s failed: %s", task_name, exc)
+        await safe_reply(update, "Data source timeout. Try again in 1-2 minutes.")
+        return None
+    except Exception:
+        logger.exception("%s failed", task_name)
+        await safe_reply(update, "Temporary data processing error. Try again in 1-2 minutes.")
+        return None
+
+    return list(zip(windows, snaps))
+
+
 # ---------------- COMMANDS ----------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -174,13 +196,9 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # -------- MULTI WINDOW (STATE EVOLUTION) --------
-    snapshots = []
-    for w in args:
-        ts_from, ts_to = parse_window(w)
-        snap = await run_data_task(update, f"state snapshot {w}", run_snapshot, ts_from, ts_to)
-        if snap is None:
-            return
-        snapshots.append((w, snap))
+    snapshots = await collect_snapshots(update, "state snapshots", args)
+    if snapshots is None:
+        return
 
     analysis = analyze_state_evolution(snapshots)
 
@@ -351,17 +369,20 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     windows = ["12h", "6h", "1h"]
 
+    ticker_snapshots = await collect_snapshots(update, "status ticker snapshots", windows, symbol=symbol)
+    if ticker_snapshots is None:
+        return
+
+    market_snapshots = await collect_snapshots(update, "status market snapshots", windows)
+    if market_snapshots is None:
+        return
+
     text = f"=== STATUS: {symbol} ===\n\n"
 
     # ---------- TICKER (FUTURES) ----------
     text += "[Ticker (Futures)]\n"
 
-    for w in windows:
-        ts_from, ts_to = parse_window(w)
-        snap = await run_data_task(update, f"status snapshot {w}", run_snapshot, ts_from, ts_to, symbol=symbol)
-        if snap is None:
-            return
-
+    for w, snap in ticker_snapshots:
         r = snap.risk or {}
         d = getattr(snap, "divergence", {}) or {}
 
@@ -375,12 +396,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ---------- MARKET CONTEXT (BTC / ETH) ----------
     text += "\n[Market context (BTC / ETH)]\n"
 
-    for w in windows:
-        ts_from, ts_to = parse_window(w)
-        snap = await run_data_task(update, f"status market snapshot {w}", run_snapshot, ts_from, ts_to)
-        if snap is None:
-            return  # ⚠️ без symbol → market-wide
-
+    for w, snap in market_snapshots:
         o = snap.options or {}
         v = snap.deribit or {}
 
@@ -512,4 +528,3 @@ def run_bot():
     app.run_polling()
 
     print("Telegram bot polling stopped.", flush=True)
-
