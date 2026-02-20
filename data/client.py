@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
+from json import loads
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
-import requests
 from config import SUPABASE_URL, SUPABASE_KEY
 
 
@@ -98,6 +101,40 @@ class SupabaseClient:
 
         return filtered
 
+    def _request_page(self, event: str, ts_from: int, ts_to: int, offset: int) -> tuple[list[dict], str]:
+        query = urlencode(
+            [
+                ("event", f"eq.{event}"),
+                ("and", f"(ts.gte.{ts_from},ts.lte.{ts_to})"),
+                ("order", "ts.asc"),
+                ("limit", str(self.PAGE_SIZE)),
+                ("offset", str(offset)),
+            ]
+        )
+        url = f"{SUPABASE_URL}/rest/v1/logs?{query}"
+
+        req = Request(
+            url,
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Prefer": "count=exact",
+            },
+            method="GET",
+        )
+
+        try:
+            with urlopen(req, timeout=10) as response:
+                raw = response.read().decode("utf-8")
+                page = loads(raw)
+                content_range = response.headers.get("Content-Range", "")
+                return page, content_range
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+            raise RuntimeError(f"Supabase HTTP error {exc.code}: {detail}") from exc
+        except URLError as exc:
+            raise RuntimeError(f"Supabase connection error: {exc.reason}") from exc
+
     def fetch(self, event: str, ts_from: int, ts_to: int, symbol: str | None = None) -> list[dict]:
         if not SUPABASE_URL or not SUPABASE_KEY:
             raise RuntimeError("Supabase credentials not set")
@@ -105,28 +142,9 @@ class SupabaseClient:
         offset = 0
 
         while True:
-            r = requests.get(
-                f"{SUPABASE_URL}/rest/v1/logs",
-                headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {SUPABASE_KEY}",
-                    "Prefer": "count=exact",
-                },
-                params=[
-                    ("event", f"eq.{event}"),
-                    ("and", f"(ts.gte.{ts_from},ts.lte.{ts_to})"),
-                    ("order", "ts.asc"),
-                    ("limit", str(self.PAGE_SIZE)),
-                    ("offset", str(offset)),
-                ],
-                timeout=10,
-            )
-            r.raise_for_status()
-
-            page = r.json()
+            page, content_range = self._request_page(event, ts_from, ts_to, offset)
             rows.extend(page)
 
-            content_range = r.headers.get("Content-Range", "")
             total = None
             if "/" in content_range:
                 _, total_part = content_range.split("/", 1)
