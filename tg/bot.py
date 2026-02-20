@@ -107,9 +107,10 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         snap = run_snapshot(ts_from, ts_to)
 
         await update.message.reply_text(
-            f"=== {window} SNAPSHOT ===\n\n" + snapshot_to_text(snap)
+            f"=== {window} SNAPSHOT ===\n\n"
+            + snapshot_to_text(snap)
+            + "\n\nInterpretation available in Risk Log channel."
         )
-        return
 
     # -------- MULTI WINDOW (STATE EVOLUTION) --------
     snapshots = []
@@ -130,10 +131,9 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for k, v in analysis["changes"].items():
         text += f"{k}: {v}\n"
 
-    text += "\n=== CONCLUSION ===\n"
-    text += analysis["conclusion"]
-
-    await update.message.reply_text(text)
+    await update.message.reply_text(
+        text + "\nInterpretation available in Risk Log channel."
+    )
 
 async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # -------- ACTIVE STATES (1h) --------
@@ -263,7 +263,9 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
         snaps["before"],
     )
 
-    await update.message.reply_text(text)
+    await update.message.reply_text(
+        text + "Interpretation available in Risk Log channel."
+    )
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -370,6 +372,11 @@ async def divergence_watcher(app):
 
         await asyncio.sleep(120)  # 2 минуты
 
+async def context(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Market context is published daily\n"
+        "in the Risk Log channel."
+    )
 
 # ---------------- RUN ----------------
 
@@ -382,6 +389,7 @@ def run_bot():
     app.add_handler(CommandHandler("alerts", alerts))
     app.add_handler(CommandHandler("event", event))
     app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("context", context))
 
     # ✅ правильный запуск фонового watcher
     app.job_queue.run_repeating(
