@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
 from typing import Optional
@@ -18,6 +19,8 @@ from telegram.ext import (
 from main import run_snapshot
 from trend.state_evolution import analyze_state_evolution
 from output.console import print_state_evolution
+
+MAX_TELEGRAM_TEXT_LEN = 4000
 
 # --- local anti-spam memory ---
 _LAST_ALERTS = {}  # (symbol, div_type) -> event_ts
@@ -77,10 +80,52 @@ def snapshot_to_text(snapshot):
     )
 
 
+def split_text_chunks(text: str, chunk_size: int = MAX_TELEGRAM_TEXT_LEN):
+    lines = text.splitlines(keepends=True)
+    chunks = []
+    current = ""
+
+    for line in lines:
+        if len(line) > chunk_size:
+            if current:
+                chunks.append(current)
+                current = ""
+            for i in range(0, len(line), chunk_size):
+                chunks.append(line[i:i + chunk_size])
+            continue
+
+        if len(current) + len(line) > chunk_size:
+            chunks.append(current)
+            current = line
+        else:
+            current += line
+
+    if current:
+        chunks.append(current)
+
+    return chunks or [""]
+
+
+async def safe_reply(update: Update, text: str):
+    for chunk in split_text_chunks(text):
+        try:
+            await update.message.reply_text(chunk)
+        except TimedOut:
+            await asyncio.sleep(1)
+            await update.message.reply_text(chunk)
+        except BadRequest as exc:
+            if "Message is too long" in str(exc):
+                for forced_chunk in split_text_chunks(chunk, chunk_size=2000):
+                    await update.message.reply_text(forced_chunk)
+                continue
+            raise
+
+
 # ---------------- COMMANDS ----------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+    await safe_reply(
+        update,
         "Market observer online.\n"
         "Use /stats 1h | 6h | 12h\n"
         "Or /stats 12h 6h 1h"
@@ -88,7 +133,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+    await safe_reply(
+        update,
         "/stats 1h\n"
         "/stats 6h\n"
         "/stats 12h\n"
@@ -100,7 +146,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
 
     if not args:
-        await update.message.reply_text("Usage: /stats 1h or /stats 12h 6h 1h")
+        await safe_reply(update, "Usage: /stats 1h or /stats 12h 6h 1h")
         return
 
     # -------- SINGLE WINDOW --------
@@ -109,7 +155,8 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ts_from, ts_to = parse_window(window)
         snap = run_snapshot(ts_from, ts_to)
 
-        await update.message.reply_text(
+        await safe_reply(
+            update,
             f"=== {window} SNAPSHOT ===\n\n"
             + snapshot_to_text(snap)
             + "\n\nInterpretation available in Risk Log channel."
@@ -134,9 +181,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for k, v in analysis["changes"].items():
         text += f"{k}: {v}\n"
 
-    await update.message.reply_text(
-        text + "\nInterpretation available in Risk Log channel."
-    )
+    await safe_reply(update, text + "\nInterpretation available in Risk Log channel.")
 
 async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # -------- ACTIVE STATES (1h) --------
@@ -173,7 +218,7 @@ async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text += "• none\n"
 
-    await update.message.reply_text(text)
+    await safe_reply(update, text)
 
 
 def can_send_alert(symbol, div_type, event_ts):
@@ -195,7 +240,7 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = load_divergence(ts_from, ts_to)
 
     if not rows:
-        await update.message.reply_text("No recent events found.")
+        await safe_reply(update, "No recent events found.")
         return
 
     last = rows[-1]
@@ -205,7 +250,7 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     event_ts = last.get("ts")
 
     if not event_ts:
-        await update.message.reply_text("Event timestamp missing.")
+        await safe_reply(update, "Event timestamp missing.")
         return
 
     snaps = event_anchored_analysis(event_ts)
@@ -264,21 +309,22 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += fmt_market("DURING", snaps["during"])
     text += fmt_market("AFTER", snaps["after"])
 
-    await update.message.reply_text(
+    await safe_reply(
+        update,
         text
         + "Interpretation available in Risk Log channel.\n\n"
-        + format_scope()
+        + format_scope(),
     )
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Usage: /status BTCUSDT")
+        await safe_reply(update, "Usage: /status BTCUSDT")
         return
 
     symbol = normalize_ticker(context.args[0])
     if symbol not in SUPPORTED_TICKERS:
-        await update.message.reply_text("unknown ticker")
+        await safe_reply(update, "unknown ticker")
         return
 
     windows = ["12h", "6h", "1h"]
@@ -320,9 +366,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"({v.get('iv_slope_avg', 0):+.2f})\n"
         )
 
-    await update.message.reply_text(
-        text + "\n" + format_scope()
-    )
+    await safe_reply(update, text + "\n" + format_scope())
 
 
 async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -342,7 +386,7 @@ async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += f"12h ↔ 1h: {data['volatility']['12h_1h']}\n"
     text += f"6h  ↔ 1h: {data['volatility']['6h_1h']}"
 
-    await update.message.reply_text(text)
+    await safe_reply(update, text)
 
 
 logger = logging.getLogger(__name__)
@@ -394,7 +438,8 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.exception("Telegram update handling failed", exc_info=context.error)
 
 async def context(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+    await safe_reply(
+        update,
         "Market context is published daily\n"
         "in the Risk Log channel."
     )
@@ -412,8 +457,6 @@ def format_scope():
 def run_bot():
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
-
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -439,5 +482,3 @@ def run_bot():
     app.run_polling()
 
     print("Telegram bot polling stopped.", flush=True)
-
-
