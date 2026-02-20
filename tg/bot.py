@@ -382,6 +382,10 @@ async def divergence_watcher(app):
 async def divergence_watcher_job(context: ContextTypes.DEFAULT_TYPE):
     try:
         await divergence_watcher(context.application)
+    except TimedOut:
+        logger.warning("Watcher send timeout; will retry on next cycle")
+    except NetworkError as exc:
+        logger.warning("Watcher network error: %s", exc)
     except Exception:
         logger.exception("Watcher error")
 
@@ -406,10 +410,10 @@ def format_scope():
 # ---------------- RUN ----------------
 
 def run_bot():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
+
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -435,4 +439,5 @@ def run_bot():
     app.run_polling()
 
     print("Telegram bot polling stopped.", flush=True)
+
 
