@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
@@ -501,30 +502,47 @@ def format_scope():
 # ---------------- RUN ----------------
 
 def run_bot():
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("apscheduler").setLevel(logging.WARNING)
-
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("alerts", alerts))
-    app.add_handler(CommandHandler("event", event))
-    app.add_handler(CommandHandler("status", status))
-    app.add_handler(CommandHandler("context", context))
-    app.add_handler(CommandHandler("dispersion", dispersion))
-    app.add_error_handler(on_error)
-
-
-    # ✅ правильный запуск фонового watcher
-    app.job_queue.run_repeating(
-        divergence_watcher_job,
-        interval=120,
-        first=10,
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    print("Telegram bot running...", flush=True)
-    app.run_polling()
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
+    logger.info("Starting Telegram bot process")
 
-    print("Telegram bot polling stopped.", flush=True)
+    while True:
+        app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("help", help_cmd))
+        app.add_handler(CommandHandler("stats", stats))
+        app.add_handler(CommandHandler("alerts", alerts))
+        app.add_handler(CommandHandler("event", event))
+        app.add_handler(CommandHandler("status", status))
+        app.add_handler(CommandHandler("context", context))
+        app.add_handler(CommandHandler("dispersion", dispersion))
+        app.add_error_handler(on_error)
+
+        # ✅ правильный запуск фонового watcher
+        app.job_queue.run_repeating(
+            divergence_watcher_job,
+            interval=120,
+            first=10,
+        )
+
+        print("Telegram bot running...", flush=True)
+
+        try:
+            app.run_polling(close_loop=False)
+        except KeyboardInterrupt:
+            logger.info("Bot interrupted by user")
+            break
+        except (TimedOut, NetworkError) as exc:
+            logger.warning("Polling interrupted due to network issue: %s", exc)
+        except Exception:
+            logger.exception("Polling crashed with unexpected error")
+        finally:
+            logger.warning("Polling stopped. Restarting in 5 seconds...")
+            print("Telegram bot polling stopped.", flush=True)
+            time.sleep(5)
