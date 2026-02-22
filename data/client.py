@@ -172,3 +172,51 @@ class SupabaseClient:
 
         rows = self._filter_by_window(rows, ts_from, ts_to)
         return self._filter_by_symbol(rows, symbol)
+
+
+from datetime import datetime, timezone
+
+
+def record_state(
+    client: SupabaseClient,
+    layer: str,
+    state_key: str,
+    state_value: str,
+    symbol: str | None = None,
+):
+    """
+    Записывает состояние в state_history,
+    ТОЛЬКО если оно изменилось.
+    """
+
+    # 1. Берём последнюю запись
+    query = (
+        client
+        .table("state_history")
+        .select("state_value")
+        .eq("layer", layer)
+        .eq("state_key", state_key)
+        .order("ts", desc=True)
+        .limit(1)
+    )
+
+    if symbol is None:
+        query = query.is_("symbol", None)
+    else:
+        query = query.eq("symbol", symbol)
+
+    res = query.execute()
+    rows = res.data or []
+
+    # 2. Если значение не изменилось — ничего не делаем
+    if rows and rows[0]["state_value"] == str(state_value):
+        return
+
+    # 3. Пишем новую запись
+    client.table("state_history").insert({
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "layer": layer,
+        "state_key": state_key,
+        "state_value": str(state_value),
+        "symbol": symbol,
+    }).execute()
