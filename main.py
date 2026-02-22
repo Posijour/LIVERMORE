@@ -1,4 +1,5 @@
-
+from data.client import record_state
+from data.queries import client
 import argparse
 
 from typing import Optional
@@ -63,6 +64,44 @@ def run_snapshot(ts_from, ts_to, symbol: Optional[str] = None):
     snapshot.active_states = detect_states(snapshot)
     snapshot.divergence = aggregate_divergence(div_rows, risk_rows)
 
+        if snapshot.risk:
+            avg_risk = snapshot.risk.get("avg_risk", 0)
+            risk_act = snapshot.risk.get("risk_2plus_pct", 0)
+    
+            record_state(
+                client,
+                layer="risk",
+                state_key="risk_gt_0.7",
+                state_value=str(avg_risk > 0.7),
+                symbol=symbol,
+            )
+    
+            record_state(
+                client,
+                layer="risk",
+                state_key="riskact_gt_20",
+                state_value=str(risk_act > 20),
+                symbol=symbol,
+            )
+
+        if snapshot.options:
+            record_state(
+                client,
+                layer="structure",
+                state_key="struct_phase",
+                state_value=snapshot.options.get("dominant_phase"),
+                symbol=None,
+            )
+
+        if snapshot.deribit:
+            record_state(
+                client,
+                layer="vol",
+                state_key="vol_state",
+                state_value=snapshot.deribit.get("vbi_state"),
+                symbol=None,
+            )
+            
     return snapshot
 
 def parse_args():
