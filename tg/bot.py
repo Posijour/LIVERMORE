@@ -210,10 +210,6 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"[{label}]\n"
         text += snapshot_to_text(snap) + "\n\n"
 
-    text += "=== CHANGES ===\n"
-    for k, v in analysis["changes"].items():
-        text += f"{k}: {v}\n"
-
     await safe_reply(update, text + "\nInterpretation available in Risk Log channel.")
 
 async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -297,10 +293,9 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = "=== EVENT ANCHORED ANALYSIS ===\n\n"
-    text += f"Event:\n{symbol} — {div_type}\n\n"
+    text += f"Event:\n{symbol} — {div_type} (PERPS)\n\n"
 
     # ---------- TICKER (FUTURES) ----------
-    text += "[Ticker (Futures)]\n"
 
     def fmt_ticker(title, snap):
         r = snap.risk or {}
@@ -332,7 +327,7 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     # ---------- MARKET CONTEXT (BTC / ETH) ----------
-    text += "[Market context (BTC / ETH)]\n"
+    text += "Options context (BTC / ETH)\n\n"
 
     def fmt_market(title, snap):
         o = snap.options or {}
@@ -353,8 +348,7 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(
         update,
         text
-        + "Interpretation available in Risk Log channel.\n\n"
-        + format_scope(),
+        + "Interpretation available in Risk Log channel."
     )
 
 
@@ -381,7 +375,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = f"=== STATUS: {symbol} ===\n\n"
 
     # ---------- TICKER (FUTURES) ----------
-    text += "[Ticker (Futures)]\n"
+    text += "Perps\n"
 
     for w, snap in ticker_snapshots:
         r = snap.risk or {}
@@ -395,7 +389,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     # ---------- MARKET CONTEXT (BTC / ETH) ----------
-    text += "\n[Market context (BTC / ETH)]\n"
+    text += "\nOptions (BTC / ETH)\n"
 
     for w, snap in market_snapshots:
         o = snap.options or {}
@@ -409,7 +403,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"({v.get('iv_slope_avg', 0):+.2f})\n"
         )
 
-    await safe_reply(update, text + "\n" + format_scope())
+    await safe_reply(update, text)
 
 
 async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -546,3 +540,4 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
