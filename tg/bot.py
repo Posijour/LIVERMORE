@@ -8,6 +8,8 @@ from trend.event_anchored import event_anchored_analysis
 from time_utils import parse_window
 from data.queries import load_divergence
 from main import run_snapshot
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import CallbackQueryHandler
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -164,12 +166,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await safe_reply(
-        update,
-        "/stats 1h\n"
-        "/stats 6h\n"
-        "/stats 12h\n"
-        "/stats 12h 6h 1h"
+    keyboard = [
+        [InlineKeyboardButton("📊 Stats", callback_data="help:stats")],
+        [InlineKeyboardButton("🧠 Status (ticker)", callback_data="help:status")],
+        [InlineKeyboardButton("⚠️ Alerts", callback_data="run:alerts")],
+        [InlineKeyboardButton("📍 Event", callback_data="run:event")],
+        [InlineKeyboardButton("📈 Dispersion", callback_data="run:dispersion")],
+        [InlineKeyboardButton("🌐 Context", callback_data="run:context")],
+    ]
+
+    await update.message.reply_text(
+        "Available commands:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
 
@@ -492,6 +500,71 @@ def format_scope():
     lines.append(f"• Vol: {DATA_SCOPE['vol']}")
     return "\n".join(lines)
 
+async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    # ---------- STATS ----------
+    if data == "help:stats":
+        keyboard = [
+            [
+                InlineKeyboardButton("1h", callback_data="stats:1h"),
+                InlineKeyboardButton("6h", callback_data="stats:6h"),
+                InlineKeyboardButton("12h", callback_data="stats:12h"),
+            ],
+            [
+                InlineKeyboardButton(
+                    "12h → 6h → 1h",
+                    callback_data="stats:12h,6h,1h",
+                )
+            ],
+        ]
+        await query.edit_message_text(
+            "Stats windows:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
+    if data.startswith("stats:"):
+        windows = data.split(":", 1)[1].split(",")
+        context.args = windows
+        await stats(update, context)
+        return
+
+    # ---------- STATUS ----------
+    if data == "help:status":
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    t.replace("USDT", ""),
+                    callback_data=f"status:{t}",
+                )
+            ]
+            for t in sorted(SUPPORTED_TICKERS)
+        ]
+
+        await query.edit_message_text(
+            "Select ticker:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
+    if data.startswith("status:"):
+        symbol = data.split(":", 1)[1]
+        context.args = [symbol]
+        await status(update, context)
+        return
+
+    # ---------- DIRECT RUN ----------
+    if data == "run:alerts":
+        await alerts(update, context)
+    elif data == "run:event":
+        await event(update, context)
+    elif data == "run:dispersion":
+        await dispersion(update, context)
+    elif data == "run:context":
+        await context(update, context)
 
 # ---------------- RUN ----------------
 
@@ -516,6 +589,7 @@ def run_bot():
         app.add_handler(CommandHandler("status", status))
         app.add_handler(CommandHandler("context", context))
         app.add_handler(CommandHandler("dispersion", dispersion))
+        app.add_handler(CallbackQueryHandler(help_callback))
         app.add_error_handler(on_error)
 
         # ✅ правильный запуск фонового watcher
@@ -540,4 +614,5 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
