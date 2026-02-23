@@ -57,6 +57,26 @@ def normalize_ticker(raw: str) -> str:
         ticker = f"{ticker}USDT"
     return ticker
 
+def help_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Stats", callback_data="help:stats")],
+        [InlineKeyboardButton("🧠 Status (ticker)", callback_data="help:status")],
+        [InlineKeyboardButton("⚠️ Alerts", callback_data="run:alerts")],
+        [InlineKeyboardButton("📍 Event", callback_data="run:event")],
+        [InlineKeyboardButton("📈 Dispersion", callback_data="run:dispersion")],
+        [InlineKeyboardButton("🌐 Context", callback_data="run:context")],
+    ])
+
+async def lock_menu(query, text="⏳ Loading…"):
+    """
+    Убирает inline-меню и показывает статус выполнения
+    """
+    try:
+        await query.edit_message_text(text)
+    except BadRequest:
+        # сообщение могло быть уже изменено или удалено
+        pass
+
 
 # ---------------- HELPERS ----------------
 
@@ -106,18 +126,22 @@ def split_text_chunks(text: str, chunk_size: int = MAX_TELEGRAM_TEXT_LEN):
 
 
 async def safe_reply(update: Update, text: str):
+    target = None
+
+    if update.message:
+        target = update.message
+    elif update.callback_query:
+        target = update.callback_query.message
+
+    if not target:
+        return
+
     for chunk in split_text_chunks(text):
         try:
-            await update.message.reply_text(chunk)
+            await target.reply_text(chunk)
         except TimedOut:
             await asyncio.sleep(1)
-            await update.message.reply_text(chunk)
-        except BadRequest as exc:
-            if "Message is too long" in str(exc):
-                for forced_chunk in split_text_chunks(chunk, chunk_size=2000):
-                    await update.message.reply_text(forced_chunk)
-                continue
-            raise
+            await target.reply_text(chunk)
 
 
 async def run_data_task(update: Update, task_name: str, fn, *args, **kwargs):
@@ -166,20 +190,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("📊 Stats", callback_data="help:stats")],
-        [InlineKeyboardButton("🧠 Status (ticker)", callback_data="help:status")],
-        [InlineKeyboardButton("⚠️ Alerts", callback_data="run:alerts")],
-        [InlineKeyboardButton("📍 Event", callback_data="run:event")],
-        [InlineKeyboardButton("📈 Dispersion", callback_data="run:dispersion")],
-        [InlineKeyboardButton("🌐 Context", callback_data="run:context")],
-    ]
-
-    await update.message.reply_text(
-        "Available commands:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-
+    try:
+        await update.message.reply_text(
+            "Available commands:",
+            reply_markup=help_keyboard(),
+        )
+    except TimedOut:
+        await asyncio.sleep(1)
+        await update.message.reply_text(
+            "Available commands:",
+            reply_markup=help_keyboard(),
+        )
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -319,20 +340,6 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += fmt_ticker("BEFORE", snaps["before"])
     text += fmt_ticker("DURING", snaps["during"])
     text += fmt_ticker("AFTER", snaps["after"])
-
-    # ---------- DELTAS (TICKER ONLY) ----------
-    ra = snaps["after"].risk or {}
-    rb = snaps["before"].risk or {}
-
-    da = getattr(snaps["after"], "divergence", {}) or {}
-    db = getattr(snaps["before"], "divergence", {}) or {}
-
-    text += "Δ vs BEFORE:\n"
-    text += (
-        f"Risk: {ra.get('avg_risk', 0) - rb.get('avg_risk', 0):+.2f}\n"
-        f"RiskAct: {ra.get('risk_2plus_pct', 0) - rb.get('risk_2plus_pct', 0):+.1f}%\n"
-        f"Divs: {da.get('count', 0) - db.get('count', 0):+}\n\n"
-    )
 
     # ---------- MARKET CONTEXT (BTC / ETH) ----------
     text += "Options context (BTC / ETH)\n\n"
@@ -505,6 +512,13 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
+    if data == "help:back":
+        await query.edit_message_text(
+            "Available commands:",
+            reply_markup=help_keyboard(),
+        )
+        return
+
     # ---------- STATS ----------
     if data == "help:stats":
         keyboard = [
@@ -519,6 +533,9 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     callback_data="stats:12h,6h,1h",
                 )
             ],
+            [
+                InlineKeyboardButton("⬅ Back", callback_data="help:back"),
+            ],
         ]
         await query.edit_message_text(
             "Stats windows:",
@@ -527,6 +544,7 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("stats:"):
+        await lock_menu(query, "⏳ Loading stats…")
         windows = data.split(":", 1)[1].split(",")
         context.args = windows
         await stats(update, context)
@@ -543,7 +561,9 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
             for t in sorted(SUPPORTED_TICKERS)
         ]
-
+        keyboard.append(
+            [InlineKeyboardButton("⬅ Back", callback_data="help:back")]
+        )
         await query.edit_message_text(
             "Select ticker:",
             reply_markup=InlineKeyboardMarkup(keyboard),
@@ -551,6 +571,7 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("status:"):
+        await lock_menu(query, "⏳ Loading status…")
         symbol = data.split(":", 1)[1]
         context.args = [symbol]
         await status(update, context)
@@ -558,13 +579,21 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ---------- DIRECT RUN ----------
     if data == "run:alerts":
+        await lock_menu(query, "⏳ Loading alerts…")
         await alerts(update, context)
+        return
     elif data == "run:event":
+        await lock_menu(query, "⏳ Loading event…")
         await event(update, context)
+        return
     elif data == "run:dispersion":
+        await lock_menu(query, "⏳ Loading dispersion…")
         await dispersion(update, context)
+        return
     elif data == "run:context":
+        await lock_menu(query, "⏳ Loading context…")
         await context(update, context)
+        return
 
 # ---------------- RUN ----------------
 
@@ -614,5 +643,3 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
-
-
