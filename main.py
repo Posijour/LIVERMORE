@@ -14,6 +14,7 @@ from models.snapshot import MarketSnapshot
 from time_utils import parse_datetime, parse_window
 from trend.analyzer import analyze_direction
 from data.queries import load_divergence
+from persistence.state_history import record_state
 
 
 def aggregate_divergence(rows, risk_rows):
@@ -64,6 +65,36 @@ def run_snapshot(ts_from, ts_to, symbol: Optional[str] = None):
     snapshot.divergence = aggregate_divergence(div_rows, risk_rows)
 
     return snapshot
+
+
+def persist_snapshot_state(snapshot: MarketSnapshot, symbol: Optional[str] = None) -> None:
+    """
+    Persist current aggregate state for the latest ingestion cycle.
+    Inserts only when value changed (handled by record_state).
+    """
+    if snapshot.risk:
+        record_state(
+            layer="risk",
+            state_key="risk_2plus_pct",
+            state_value=str(snapshot.risk.get("risk_2plus_pct")),
+            symbol=symbol,
+        )
+
+    if snapshot.options:
+        record_state(
+            layer="structure",
+            state_key="dominant_phase",
+            state_value=str(snapshot.options.get("dominant_phase")),
+            symbol=symbol,
+        )
+
+    if snapshot.deribit:
+        record_state(
+            layer="volatility",
+            state_key="vbi_state",
+            state_value=str(snapshot.deribit.get("vbi_state")),
+            symbol=symbol,
+        )
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Build market snapshot from Supabase logs")
