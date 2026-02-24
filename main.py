@@ -67,28 +67,10 @@ def run_snapshot(ts_from, ts_to, symbol: Optional[str] = None):
     return snapshot
 
 
-def _avg_risk_state(value: float | int | None) -> str:
+def _is_above_threshold(value: float | int | None, threshold: float) -> str:
     if value is None:
-        return "NO_DATA"
-
-    numeric = float(value)
-    if numeric > 1.0:
-        return "GT_1_0"
-    if numeric > 0.7:
-        return "GT_0_7"
-    return "LE_0_7"
-
-
-def _risk_2plus_pct_state(value: float | int | None) -> str:
-    if value is None:
-        return "NO_DATA"
-
-    numeric = float(value)
-    if numeric > 30:
-        return "GT_30"
-    if numeric > 20:
-        return "GT_20"
-    return "LE_20"
+        return "0"
+    return "1" if float(value) > threshold else "0"
 
 
 def persist_snapshot_state(snapshot: MarketSnapshot, symbol: Optional[str] = None) -> None:
@@ -97,19 +79,31 @@ def persist_snapshot_state(snapshot: MarketSnapshot, symbol: Optional[str] = Non
     Inserts only when value changed (handled by record_state).
     """
     if snapshot.risk:
-        avg_risk_state = _avg_risk_state(snapshot.risk.get("avg_risk"))
-        risk_2plus_pct_state = _risk_2plus_pct_state(snapshot.risk.get("risk_2plus_pct"))
+        avg_risk = snapshot.risk.get("avg_risk")
+        risk_2plus_pct = snapshot.risk.get("risk_2plus_pct")
 
         record_state(
             layer="risk",
-            state_key="avg_risk",
-            state_value=avg_risk_state,
+            state_key="avg_risk_gt_0_7",
+            state_value=_is_above_threshold(avg_risk, 0.7),
             symbol=symbol,
         )
         record_state(
             layer="risk",
-            state_key="risk_2plus_pct",
-            state_value=risk_2plus_pct_state,
+            state_key="avg_risk_gt_1_0",
+            state_value=_is_above_threshold(avg_risk, 1.0),
+            symbol=symbol,
+        )
+        record_state(
+            layer="risk",
+            state_key="risk_2plus_pct_gt_20",
+            state_value=_is_above_threshold(risk_2plus_pct, 20),
+            symbol=symbol,
+        )
+        record_state(
+            layer="risk",
+            state_key="risk_2plus_pct_gt_30",
+            state_value=_is_above_threshold(risk_2plus_pct, 30),
             symbol=symbol,
         )
 
