@@ -15,6 +15,16 @@ class SupabaseClient:
     MAX_RETRIES = 3
     RETRY_BACKOFF_SECONDS = 1.5
 
+    def _parse_total_from_content_range(self, content_range: str) -> int | None:
+        if "/" not in content_range:
+            return None
+
+        _, total_part = content_range.split("/", 1)
+        if total_part.isdigit():
+            return int(total_part)
+
+        return None
+
     def _execute_request(self, req: Request) -> tuple[list[dict], str]:
         for attempt in range(1, self.MAX_RETRIES + 1):
             try:
@@ -205,11 +215,7 @@ class SupabaseClient:
             page, content_range = self._request_page(event, ts_from, ts_to, offset)
             rows.extend(page)
 
-            total = None
-            if "/" in content_range:
-                _, total_part = content_range.split("/", 1)
-                if total_part.isdigit():
-                    total = int(total_part)
+            total = self._parse_total_from_content_range(content_range)
 
             if total is not None:
                 if offset + len(page) >= total:
@@ -250,11 +256,7 @@ class SupabaseClient:
             )
             rows.extend(page)
 
-            total = None
-            if "/" in content_range:
-                _, total_part = content_range.split("/", 1)
-                if total_part.isdigit():
-                    total = int(total_part)
+            total = self._parse_total_from_content_range(content_range)
 
             if total is not None:
                 if offset + len(page) >= total:
