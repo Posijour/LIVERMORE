@@ -67,10 +67,19 @@ def run_snapshot(ts_from, ts_to, symbol: Optional[str] = None):
     return snapshot
 
 
-def _is_above_threshold(value: float | int | None, threshold: float) -> str:
+def _risk_band(value: float | int | None, levels: tuple[float, float], labels: tuple[str, str, str]) -> str:
     if value is None:
-        return "0"
-    return "1" if float(value) > threshold else "0"
+        return "NO_DATA"
+
+    numeric = float(value)
+    low, high = levels
+    low_label, mid_label, high_label = labels
+
+    if numeric > high:
+        return high_label
+    if numeric > low:
+        return mid_label
+    return low_label
 
 
 def persist_snapshot_state(snapshot: MarketSnapshot, symbol: Optional[str] = None) -> None:
@@ -84,26 +93,22 @@ def persist_snapshot_state(snapshot: MarketSnapshot, symbol: Optional[str] = Non
 
         record_state(
             layer="risk",
-            state_key="avg_risk_gt_0_7",
-            state_value=_is_above_threshold(avg_risk, 0.7),
+            state_key="avg_risk",
+            state_value=_risk_band(
+                avg_risk,
+                levels=(0.7, 1.0),
+                labels=("LE_0_7", "GT_0_7", "GT_1_0"),
+            ),
             symbol=symbol,
         )
         record_state(
             layer="risk",
-            state_key="avg_risk_gt_1_0",
-            state_value=_is_above_threshold(avg_risk, 1.0),
-            symbol=symbol,
-        )
-        record_state(
-            layer="risk",
-            state_key="risk_2plus_pct_gt_20",
-            state_value=_is_above_threshold(risk_2plus_pct, 20),
-            symbol=symbol,
-        )
-        record_state(
-            layer="risk",
-            state_key="risk_2plus_pct_gt_30",
-            state_value=_is_above_threshold(risk_2plus_pct, 30),
+            state_key="risk_2plus_pct",
+            state_value=_risk_band(
+                risk_2plus_pct,
+                levels=(20, 30),
+                labels=("LE_20", "GT_20", "GT_30"),
+            ),
             symbol=symbol,
         )
 
