@@ -15,6 +15,17 @@ class SupabaseClient:
     MAX_RETRIES = 3
     RETRY_BACKOFF_SECONDS = 1.5
 
+    def _build_request(self, url: str) -> Request:
+        return Request(
+            url,
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Prefer": "count=exact",
+            },
+            method="GET",
+        )
+
     def _parse_total_from_content_range(self, content_range: str) -> int | None:
         if "/" not in content_range:
             return None
@@ -177,33 +188,17 @@ class SupabaseClient:
         )
         url = f"{SUPABASE_URL}/rest/v1/logs?{query}"
 
-        req = Request(
-            url,
-            headers={
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-                "Prefer": "count=exact",
-            },
-            method="GET",
-        )
-
-        return self._execute_request(req))
+        req = self._build_request(url)
+        page, content_range = self._execute_request(req)
+        return page, content_range
 
     def _request_page_generic(self, endpoint: str, query_params: list[tuple[str, str]]) -> tuple[list[dict], str]:
         query = urlencode(query_params)
         url = f"{SUPABASE_URL}/rest/v1/{endpoint}?{query}"
 
-        req = Request(
-            url,
-            headers={
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-                "Prefer": "count=exact",
-            },
-            method="GET",
-        )
-
-        return self._execute_request(req)
+        req = self._build_request(url)
+        page, content_range = self._execute_request(req)
+        return page, content_range
 
     def fetch(self, event: str, ts_from: int, ts_to: int, symbol: str | None = None) -> list[dict]:
         if not SUPABASE_URL or not SUPABASE_KEY:
