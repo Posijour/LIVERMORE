@@ -7,7 +7,7 @@ from trend.dispersion import compute_dispersion
 from trend.event_anchored import event_anchored_analysis
 from time_utils import parse_window
 from data.queries import load_divergence
-from main import run_snapshot
+from main import persist_snapshot_state, run_snapshot
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler
 from telegram import Update
@@ -450,6 +450,10 @@ async def divergence_watcher(app):
     from data.queries import load_divergence
     from time_utils import parse_window
 
+    cycle_from, cycle_to = parse_window("1h")
+    snapshot = await asyncio.to_thread(run_snapshot, cycle_from, cycle_to)
+    await asyncio.to_thread(persist_snapshot_state, snapshot)
+
     ts_from, ts_to = parse_window("2h")
     rows = await asyncio.to_thread(load_divergence, ts_from, ts_to)
 
@@ -643,3 +647,4 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
