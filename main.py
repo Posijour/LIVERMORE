@@ -67,16 +67,49 @@ def run_snapshot(ts_from, ts_to, symbol: Optional[str] = None):
     return snapshot
 
 
+def _avg_risk_state(value: float | int | None) -> str:
+    if value is None:
+        return "NO_DATA"
+
+    numeric = float(value)
+    if numeric > 1.0:
+        return "GT_1_0"
+    if numeric > 0.7:
+        return "GT_0_7"
+    return "LE_0_7"
+
+
+def _risk_2plus_pct_state(value: float | int | None) -> str:
+    if value is None:
+        return "NO_DATA"
+
+    numeric = float(value)
+    if numeric > 30:
+        return "GT_30"
+    if numeric > 20:
+        return "GT_20"
+    return "LE_20"
+
+
 def persist_snapshot_state(snapshot: MarketSnapshot, symbol: Optional[str] = None) -> None:
     """
     Persist current aggregate state for the latest ingestion cycle.
     Inserts only when value changed (handled by record_state).
     """
     if snapshot.risk:
+        avg_risk_state = _avg_risk_state(snapshot.risk.get("avg_risk"))
+        risk_2plus_pct_state = _risk_2plus_pct_state(snapshot.risk.get("risk_2plus_pct"))
+
+        record_state(
+            layer="risk",
+            state_key="avg_risk",
+            state_value=avg_risk_state,
+            symbol=symbol,
+        )
         record_state(
             layer="risk",
             state_key="risk_2plus_pct",
-            state_value=str(snapshot.risk.get("risk_2plus_pct")),
+            state_value=risk_2plus_pct_state,
             symbol=symbol,
         )
 
