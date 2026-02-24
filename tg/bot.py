@@ -106,14 +106,12 @@ def _format_hours(hours: int) -> str:
     return f"{hours}h"
 
 
-def _format_threshold_persistence(label: str, state: tuple[str, int] | None) -> str:
+def _format_risk_band_persistence(label: str, state: tuple[str, int] | None) -> str:
     if state is None:
         return f"{label}: no data"
 
     value, hours = state
-    if value == "1":
-        return f"{label}: {_format_hours(hours)}"
-    return f"{label}: inactive"
+    return f"{label}: {value} for {_format_hours(hours)}"
 
 
 def _format_named_state_persistence(label: str, state: tuple[str, int] | None) -> str:
@@ -125,18 +123,14 @@ def _format_named_state_persistence(label: str, state: tuple[str, int] | None) -
 
 
 def build_persistence_block() -> str:
-    risk_gt_07 = get_state_persistence_hours("risk", "avg_risk_gt_0_7", symbol=None)
-    risk_gt_10 = get_state_persistence_hours("risk", "avg_risk_gt_1_0", symbol=None)
-    riskact_gt_20 = get_state_persistence_hours("risk", "risk_2plus_pct_gt_20", symbol=None)
-    riskact_gt_30 = get_state_persistence_hours("risk", "risk_2plus_pct_gt_30", symbol=None)
+    avg_risk_state = get_state_persistence_hours("risk", "avg_risk", symbol=None)
+    riskact_state = get_state_persistence_hours("risk", "risk_2plus_pct", symbol=None)
     struct_state = get_state_persistence_hours("structure", "dominant_phase", symbol=None)
     vol_state = get_state_persistence_hours("volatility", "vbi_state", symbol=None)
 
     lines = ["Persistence:"]
-    lines.append(_format_threshold_persistence("Risk >0.7", risk_gt_07))
-    lines.append(_format_threshold_persistence("Risk >1.0", risk_gt_10))
-    lines.append(_format_threshold_persistence("RiskAct >20%", riskact_gt_20))
-    lines.append(_format_threshold_persistence("RiskAct >30%", riskact_gt_30))
+    lines.append(_format_risk_band_persistence("Risk", avg_risk_state))
+    lines.append(_format_risk_band_persistence("RiskAct", riskact_state))
     lines.append(_format_named_state_persistence("Struct", struct_state))
     lines.append(_format_named_state_persistence("Vol", vol_state))
     return "\n".join(lines)
