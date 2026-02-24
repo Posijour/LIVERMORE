@@ -15,7 +15,7 @@ class SupabaseClient:
     MAX_RETRIES = 3
     RETRY_BACKOFF_SECONDS = 1.5
 
-def _extract_row_payload(self, row: dict) -> dict:
+    def _extract_row_payload(self, row: dict) -> dict:
         """
         Normalize heterogeneous Supabase rows into a common `logs`-like shape.
 
