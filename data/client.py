@@ -15,6 +15,36 @@ class SupabaseClient:
     MAX_RETRIES = 3
     RETRY_BACKOFF_SECONDS = 1.5
 
+def _extract_row_payload(self, row: dict) -> dict:
+        """
+        Normalize heterogeneous Supabase rows into a common `logs`-like shape.
+
+        Legacy flow stored records in `logs` with a nested `data` object.
+        Newer tables can expose fields directly on the row. Downstream
+        aggregators expect `row["data"]`, so we provide it when absent.
+        """
+        if isinstance(row.get("data"), dict):
+            return row
+
+        payload = {
+            k: v
+            for k, v in row.items()
+            if k not in {"id", "created_at", "updated_at", "event", "ts", "data"}
+        }
+
+        normalized = dict(row)
+        normalized["data"] = payload
+
+        if "ts" not in normalized:
+            ts_unix_ms = payload.get("ts_unix_ms")
+            if isinstance(ts_unix_ms, (int, float, str)):
+                try:
+                    normalized["ts"] = int(float(ts_unix_ms))
+                except ValueError:
+                    pass
+
+        return normalized
+
     def _row_ts_ms(self, row: dict) -> int | None:
         ts = row.get("ts")
 
@@ -146,6 +176,38 @@ class SupabaseClient:
 
         raise RuntimeError("Supabase connection error: exhausted retries")
 
+    def _request_page_generic(self, endpoint: str, query_params: list[tuple[str, str]]) -> tuple[list[dict], str]:
+        query = urlencode(query_params)
+        url = f"{SUPABASE_URL}/rest/v1/{endpoint}?{query}"
+
+        req = Request(
+            url,
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Prefer": "count=exact",
+            },
+            method="GET",
+        )
+
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                with urlopen(req, timeout=self.REQUEST_TIMEOUT_SECONDS) as response:
+                    raw = response.read().decode("utf-8")
+                    page = loads(raw)
+                    content_range = response.headers.get("Content-Range", "")
+                    return page, content_range
+            except HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+                raise RuntimeError(f"Supabase HTTP error {exc.code}: {detail}") from exc
+            except (TimeoutError, socket.timeout, URLError) as exc:
+                if attempt == self.MAX_RETRIES:
+                    reason = getattr(exc, "reason", exc)
+                    raise RuntimeError(f"Supabase connection error: {reason}") from exc
+                time.sleep(self.RETRY_BACKOFF_SECONDS * attempt)
+
+        raise RuntimeError("Supabase connection error: exhausted retries"
+
     def fetch(self, event: str, ts_from: int, ts_to: int, symbol: str | None = None) -> list[dict]:
         if not SUPABASE_URL or not SUPABASE_KEY:
             raise RuntimeError("Supabase credentials not set")
@@ -171,4 +233,49 @@ class SupabaseClient:
             offset += self.PAGE_SIZE
 
         rows = self._filter_by_window(rows, ts_from, ts_to)
-        return self._filter_by_symbol(rows, symbol)
+        rows = self._filter_by_symbol(rows, symbol)
+        return [self._extract_row_payload(r) for r in rows]
+
+    def fetch_table(
+        self,
+        table: str,
+        ts_from: int,
+        ts_to: int,
+        symbol: str | None = None,
+        ts_column: str = "ts_unix_ms",
+    ) -> list[dict]:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            raise RuntimeError("Supabase credentials not set")
+
+        rows: list[dict] = []
+        offset = 0
+
+        while True:
+            page, content_range = self._request_page_generic(
+                table,
+                [
+                    (ts_column, f"gte.{ts_from}"),
+                    (ts_column, f"lte.{ts_to}"),
+                    ("order", f"{ts_column}.asc"),
+                    ("limit", str(self.PAGE_SIZE)),
+                    ("offset", str(offset)),
+                ],
+            )
+            rows.extend(page)
+
+            total = None
+            if "/" in content_range:
+                _, total_part = content_range.split("/", 1)
+                if total_part.isdigit():
+                    total = int(total_part)
+
+            if total is not None:
+                if offset + len(page) >= total:
+                    break
+            elif len(page) < self.PAGE_SIZE:
+                break
+
+            offset += self.PAGE_SIZE
+
+        rows = self._filter_by_symbol(rows, symbol)
+        return [self._extract_row_payload(r) for r in rows]
