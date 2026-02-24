@@ -8,6 +8,7 @@ from trend.event_anchored import event_anchored_analysis
 from time_utils import parse_window
 from data.queries import load_divergence
 from main import persist_snapshot_state, run_snapshot
+from persistence.state_history import get_state_persistence_hours
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler
 from telegram import Update
@@ -98,6 +99,47 @@ def snapshot_to_text(snapshot):
         f"{d.get('dominant_type')}"
     )
 
+
+
+
+def _format_hours(hours: int) -> str:
+    return f"{hours}h"
+
+
+def _format_threshold_persistence(label: str, state: tuple[str, int] | None) -> str:
+    if state is None:
+        return f"{label}: no data"
+
+    value, hours = state
+    if value == "1":
+        return f"{label}: {_format_hours(hours)}"
+    return f"{label}: inactive"
+
+
+def _format_named_state_persistence(label: str, state: tuple[str, int] | None) -> str:
+    if state is None:
+        return f"{label}: no data"
+
+    value, hours = state
+    return f"{label}: {value} for {_format_hours(hours)}"
+
+
+def build_persistence_block() -> str:
+    risk_gt_07 = get_state_persistence_hours("risk", "avg_risk_gt_0_7", symbol=None)
+    risk_gt_10 = get_state_persistence_hours("risk", "avg_risk_gt_1_0", symbol=None)
+    riskact_gt_20 = get_state_persistence_hours("risk", "risk_2plus_pct_gt_20", symbol=None)
+    riskact_gt_30 = get_state_persistence_hours("risk", "risk_2plus_pct_gt_30", symbol=None)
+    struct_state = get_state_persistence_hours("structure", "dominant_phase", symbol=None)
+    vol_state = get_state_persistence_hours("volatility", "vbi_state", symbol=None)
+
+    lines = ["Persistence:"]
+    lines.append(_format_threshold_persistence("Risk >0.7", risk_gt_07))
+    lines.append(_format_threshold_persistence("Risk >1.0", risk_gt_10))
+    lines.append(_format_threshold_persistence("RiskAct >20%", riskact_gt_20))
+    lines.append(_format_threshold_persistence("RiskAct >30%", riskact_gt_30))
+    lines.append(_format_named_state_persistence("Struct", struct_state))
+    lines.append(_format_named_state_persistence("Vol", vol_state))
+    return "\n".join(lines)
 
 def split_text_chunks(text: str, chunk_size: int = MAX_TELEGRAM_TEXT_LEN):
     lines = text.splitlines(keepends=True)
@@ -230,8 +272,6 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if snapshots is None:
         return
 
-    analysis = analyze_state_evolution(snapshots)
-
     # Формируем текст
     text = "=== STATE EVOLUTION ===\n\n"
 
@@ -239,7 +279,11 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"[{label}]\n"
         text += snapshot_to_text(snap) + "\n\n"
 
-    await safe_reply(update, text + "\nInterpretation available in Risk Log channel.")
+    persistence_block = await run_data_task(update, "state persistence", build_persistence_block)
+    if persistence_block is not None:
+        text += persistence_block + "\n\n"
+
+    await safe_reply(update, text + "Interpretation available in Risk Log channel.")
 
 async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # -------- ACTIVE STATES (1h) --------
@@ -418,6 +462,10 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"({v.get('iv_slope_avg', 0):+.2f})\n"
         )
 
+    persistence_block = await run_data_task(update, "status persistence", build_persistence_block)
+    if persistence_block is not None:
+        text += "\n" + persistence_block
+
     await safe_reply(update, text)
 
 
@@ -451,8 +499,9 @@ async def divergence_watcher(app):
     from time_utils import parse_window
 
     cycle_from, cycle_to = parse_window("1h")
-    snapshot = await asyncio.to_thread(run_snapshot, cycle_from, cycle_to)
-    await asyncio.to_thread(persist_snapshot_state, snapshot)
+
+    market_snapshot = await asyncio.to_thread(run_snapshot, cycle_from, cycle_to)
+    await asyncio.to_thread(persist_snapshot_state, market_snapshot, None)
 
     ts_from, ts_to = parse_window("2h")
     rows = await asyncio.to_thread(load_divergence, ts_from, ts_to)
@@ -647,4 +696,3 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
-
