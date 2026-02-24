@@ -106,12 +106,34 @@ def _format_hours(hours: int) -> str:
     return f"{hours}h"
 
 
-def _format_risk_band_persistence(label: str, state: tuple[str, int] | None) -> str:
+def _humanize_risk_band(state_key: str, value: str) -> str:
+    avg_risk_map = {
+        "LE_0_7": "≤ 0.7",
+        "GT_0_7": "> 0.7",
+        "GT_1_0": "> 1.0",
+        "NO_DATA": "no data",
+    }
+    riskact_map = {
+        "LE_20": "≤ 20%",
+        "GT_20": "> 20%",
+        "GT_30": "> 30%",
+        "NO_DATA": "no data",
+    }
+
+    if state_key == "avg_risk":
+        return avg_risk_map.get(value, value)
+    if state_key == "risk_2plus_pct":
+        return riskact_map.get(value, value)
+    return value
+
+
+def _format_risk_band_persistence(label: str, state_key: str, state: tuple[str, int] | None) -> str:
     if state is None:
         return f"{label}: no data"
 
     value, hours = state
-    return f"{label}: {value} for {_format_hours(hours)}"
+    human_value = _humanize_risk_band(state_key, value)
+    return f"{label} {human_value} for {_format_hours(hours)}"
 
 
 def _format_named_state_persistence(label: str, state: tuple[str, int] | None) -> str:
@@ -129,8 +151,8 @@ def build_persistence_block() -> str:
     vol_state = get_state_persistence_hours("volatility", "vbi_state", symbol=None)
 
     lines = ["Persistence:"]
-    lines.append(_format_risk_band_persistence("Risk", avg_risk_state))
-    lines.append(_format_risk_band_persistence("RiskAct", riskact_state))
+    lines.append(_format_risk_band_persistence("Risk", "avg_risk", avg_risk_state))
+    lines.append(_format_risk_band_persistence("RiskAct", "risk_2plus_pct", riskact_state))
     lines.append(_format_named_state_persistence("Struct", struct_state))
     lines.append(_format_named_state_persistence("Vol", vol_state))
     return "\n".join(lines)
