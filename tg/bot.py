@@ -9,15 +9,12 @@ from time_utils import parse_window
 from data.queries import load_divergence
 from main import persist_snapshot_state, run_snapshot
 from persistence.state_history import get_state_persistence_hours
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import CallbackQueryHandler
-from telegram import ReplyKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
-    MessageHandler,
-    filters,
 )
 
 from trend.state_evolution import analyze_state_evolution
@@ -68,14 +65,32 @@ def help_keyboard():
         [InlineKeyboardButton("📍 Event", callback_data="run:event")],
         [InlineKeyboardButton("📈 Dispersion", callback_data="run:dispersion")],
         [InlineKeyboardButton("🌐 Context", callback_data="run:context")],
+        [InlineKeyboardButton("⬅ Back to menu", callback_data="main:menu")],
     ])
 
 
-def app_keyboard():
-    return ReplyKeyboardMarkup(
-        [["commands", "information"]],
-        resize_keyboard=True,
-    )
+def main_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("commands", callback_data="main:commands"),
+            InlineKeyboardButton("information", callback_data="main:information"),
+        ],
+        [
+            InlineKeyboardButton("📊 Stats", callback_data="help:stats"),
+            InlineKeyboardButton("🧠 Status", callback_data="help:status"),
+        ],
+        [
+            InlineKeyboardButton("🌐 Context", callback_data="run:context"),
+            InlineKeyboardButton("📈 Dispersion", callback_data="run:dispersion"),
+        ],
+    ])
+
+
+def info_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh", callback_data="main:information")],
+        [InlineKeyboardButton("⬅ Back to menu", callback_data="main:menu")],
+    ])
 
 
 INFO_TEXT = (
@@ -265,45 +280,34 @@ async def collect_snapshots(update: Update, task_name: str, windows: list[str], 
 # ---------------- COMMANDS ----------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await safe_reply(
-        update,
+    if not update.message:
+        return
+
+    await update.message.reply_text(
         "Market observer online.\n"
-        "Use /stats 1h | 6h | 12h\n"
-        "Or /stats 12h 6h 1h"
+        "Use inline menu for navigation.",
+        reply_markup=main_menu_keyboard(),
     )
-    if update.message:
-        await update.message.reply_text(
-            "Menu:",
-            reply_markup=app_keyboard(),
-        )
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        if not update.message:
-            return
-        await update.message.reply_text(
-            "Available commands:",
-            reply_markup=help_keyboard(),
-        )
-    except TimedOut:
-        await asyncio.sleep(1)
-        await update.message.reply_text(
-            "Available commands:",
-            reply_markup=help_keyboard(),
-        )
+    if not update.message:
+        return
+
+    await update.message.reply_text(
+        "Available commands:",
+        reply_markup=help_keyboard(),
+    )
 
 
 async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await safe_reply(update, INFO_TEXT)
+    if not update.message:
+        return
 
-
-async def commands_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await help_cmd(update, context)
-
-
-async def information_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await info_cmd(update, context)
+    await update.message.reply_text(
+        INFO_TEXT,
+        reply_markup=info_keyboard(),
+    )
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -626,6 +630,27 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
+    if data == "main:menu":
+        await query.edit_message_text(
+            "Main menu:",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    if data == "main:commands":
+        await query.edit_message_text(
+            "Available commands:",
+            reply_markup=help_keyboard(),
+        )
+        return
+
+    if data == "main:information":
+        await query.edit_message_text(
+            INFO_TEXT,
+            reply_markup=info_keyboard(),
+        )
+        return
+
     if data == "help:back":
         await query.edit_message_text(
             "Available commands:",
@@ -726,7 +751,6 @@ def run_bot():
 
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("help", help_cmd))
-        app.add_handler(CommandHandler("commands", help_cmd))
         app.add_handler(CommandHandler(["info", "information"], info_cmd))
         app.add_handler(CommandHandler("stats", stats))
         app.add_handler(CommandHandler("alerts", alerts))
@@ -734,9 +758,6 @@ def run_bot():
         app.add_handler(CommandHandler("status", status))
         app.add_handler(CommandHandler("context", context))
         app.add_handler(CommandHandler("dispersion", dispersion))
-        app.add_handler(MessageHandler(filters.Regex(r"(?i)^commands$"), commands_button))
-        app.add_handler(MessageHandler(filters.Regex(r"(?i)^information$"), information_button))
-        app.add_handler(MessageHandler(filters.Regex(r"^/(?:инфо)(?:@\w+)?$"), information_button))
         app.add_handler(CallbackQueryHandler(help_callback))
         app.add_error_handler(on_error)
 
