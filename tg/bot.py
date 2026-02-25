@@ -230,17 +230,38 @@ async def safe_reply(
     reply_markup: InlineKeyboardMarkup | None = None,
 ):
     target = None
+    query = update.callback_query
 
     if update.message:
         target = update.message
-    elif update.callback_query:
-        target = update.callback_query.message
+    elif query:
+        target = query.message
 
     if not target:
         return
 
     chunks = split_text_chunks(text)
     markup = reply_markup if reply_markup is not None else main_menu_keyboard()
+
+    # If we came from inline callback, replace loading text in that same message.
+    if query and chunks:
+        first_markup = markup if len(chunks) == 1 else None
+        try:
+            await query.edit_message_text(chunks[0], reply_markup=first_markup)
+        except BadRequest:
+            await target.reply_text(chunks[0], reply_markup=first_markup)
+        except TimedOut:
+            await asyncio.sleep(1)
+            await query.edit_message_text(chunks[0], reply_markup=first_markup)
+
+        for idx, chunk in enumerate(chunks[1:], start=1):
+            current_markup = markup if idx == len(chunks) - 1 else None
+            try:
+                await target.reply_text(chunk, reply_markup=current_markup)
+            except TimedOut:
+                await asyncio.sleep(1)
+                await target.reply_text(chunk, reply_markup=current_markup)
+        return
 
     for idx, chunk in enumerate(chunks):
         current_markup = markup if idx == len(chunks) - 1 else None
