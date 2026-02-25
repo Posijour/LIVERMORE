@@ -11,11 +11,13 @@ from main import persist_snapshot_state, run_snapshot
 from persistence.state_history import get_state_persistence_hours
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler
-from telegram import Update
+from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 from trend.state_evolution import analyze_state_evolution
@@ -67,6 +69,30 @@ def help_keyboard():
         [InlineKeyboardButton("📈 Dispersion", callback_data="run:dispersion")],
         [InlineKeyboardButton("🌐 Context", callback_data="run:context")],
     ])
+
+
+def app_keyboard():
+    return ReplyKeyboardMarkup(
+        [["commands", "information"]],
+        resize_keyboard=True,
+    )
+
+
+INFO_TEXT = (
+    "This bot is a diagnostic console.\n\n"
+    "It exposes different layers of market state:\n\n"
+    "• Ticker layer (Futures)\n"
+    "  Crowd risk, activity and divergences per symbol\n\n"
+    "• Market context (BTC / ETH)\n"
+    "  Options structure and volatility regime\n\n"
+    "• Time windows\n"
+    "  12h / 6h / 1h snapshots\n\n"
+    "• Persistence\n"
+    "  How long the current market regime has been active\n\n"
+    "The bot does not generate signals\n"
+    "and does not suggest actions.\n\n"
+    "Interpretation is intentionally external."
+)
 
 async def lock_menu(query, text="⏳ Loading…"):
     """
@@ -245,10 +271,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Use /stats 1h | 6h | 12h\n"
         "Or /stats 12h 6h 1h"
     )
+    if update.message:
+        await update.message.reply_text(
+            "Menu:",
+            reply_markup=app_keyboard(),
+        )
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        if not update.message:
+            return
         await update.message.reply_text(
             "Available commands:",
             reply_markup=help_keyboard(),
@@ -259,6 +292,18 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Available commands:",
             reply_markup=help_keyboard(),
         )
+
+
+async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await safe_reply(update, INFO_TEXT)
+
+
+async def commands_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await help_cmd(update, context)
+
+
+async def information_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await info_cmd(update, context)
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -681,12 +726,16 @@ def run_bot():
 
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("help", help_cmd))
+        app.add_handler(CommandHandler("commands", help_cmd))
+        app.add_handler(CommandHandler(["info", "инфо", "information"], info_cmd))
         app.add_handler(CommandHandler("stats", stats))
         app.add_handler(CommandHandler("alerts", alerts))
         app.add_handler(CommandHandler("event", event))
         app.add_handler(CommandHandler("status", status))
         app.add_handler(CommandHandler("context", context))
         app.add_handler(CommandHandler("dispersion", dispersion))
+        app.add_handler(MessageHandler(filters.Regex(r"(?i)^commands$"), commands_button))
+        app.add_handler(MessageHandler(filters.Regex(r"(?i)^information$"), information_button))
         app.add_handler(CallbackQueryHandler(help_callback))
         app.add_error_handler(on_error)
 
