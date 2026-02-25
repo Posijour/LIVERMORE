@@ -727,7 +727,7 @@ def run_bot():
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("help", help_cmd))
         app.add_handler(CommandHandler("commands", help_cmd))
-        app.add_handler(CommandHandler(["info", "инфо", "information"], info_cmd))
+        app.add_handler(CommandHandler(["info", "information"], info_cmd))
         app.add_handler(CommandHandler("stats", stats))
         app.add_handler(CommandHandler("alerts", alerts))
         app.add_handler(CommandHandler("event", event))
@@ -736,6 +736,7 @@ def run_bot():
         app.add_handler(CommandHandler("dispersion", dispersion))
         app.add_handler(MessageHandler(filters.Regex(r"(?i)^commands$"), commands_button))
         app.add_handler(MessageHandler(filters.Regex(r"(?i)^information$"), information_button))
+        app.add_handler(MessageHandler(filters.Regex(r"^/(?:инфо)(?:@\w+)?$"), information_button))
         app.add_handler(CallbackQueryHandler(help_callback))
         app.add_error_handler(on_error)
 
