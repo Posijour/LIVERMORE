@@ -57,7 +57,13 @@ def normalize_ticker(raw: str) -> str:
         ticker = f"{ticker}USDT"
     return ticker
 
-def help_keyboard():
+def menu_button_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Menu", callback_data="main:menu")],
+    ])
+
+
+def main_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 Stats", callback_data="help:stats")],
         [InlineKeyboardButton("🧠 Status (ticker)", callback_data="help:status")],
@@ -65,32 +71,20 @@ def help_keyboard():
         [InlineKeyboardButton("📍 Event", callback_data="run:event")],
         [InlineKeyboardButton("📈 Dispersion", callback_data="run:dispersion")],
         [InlineKeyboardButton("🌐 Context", callback_data="run:context")],
-        [InlineKeyboardButton("⬅ Back to menu", callback_data="main:menu")],
     ])
 
 
-def main_menu_keyboard():
+def section_nav_keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("commands", callback_data="main:commands"),
-            InlineKeyboardButton("information", callback_data="main:information"),
-        ],
-        [
-            InlineKeyboardButton("📊 Stats", callback_data="help:stats"),
-            InlineKeyboardButton("🧠 Status", callback_data="help:status"),
-        ],
-        [
-            InlineKeyboardButton("🌐 Context", callback_data="run:context"),
-            InlineKeyboardButton("📈 Dispersion", callback_data="run:dispersion"),
+            InlineKeyboardButton("⬅ Back", callback_data="main:menu"),
+            InlineKeyboardButton("Menu", callback_data="main:menu"),
         ],
     ])
 
 
-def info_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Refresh", callback_data="main:information")],
-        [InlineKeyboardButton("⬅ Back to menu", callback_data="main:menu")],
-    ])
+def help_keyboard():
+    return main_menu_keyboard()
 
 
 INFO_TEXT = (
@@ -241,7 +235,7 @@ async def safe_reply(
         return
 
     chunks = split_text_chunks(text)
-    markup = reply_markup if reply_markup is not None else main_menu_keyboard()
+    markup = reply_markup if reply_markup is not None else menu_button_keyboard()
 
     # If we came from inline callback, replace loading text in that same message.
     if query and chunks:
@@ -313,9 +307,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        "Market observer online.\n"
-        "Use inline menu for navigation.",
-        reply_markup=main_menu_keyboard(),
+        "Market observer online.",
+        reply_markup=menu_button_keyboard(),
     )
 
 
@@ -324,8 +317,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        "Available commands:",
-        reply_markup=help_keyboard(),
+        "Main menu:",
+        reply_markup=main_menu_keyboard(),
     )
 
 
@@ -335,8 +328,9 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         INFO_TEXT,
-        reply_markup=info_keyboard(),
+        reply_markup=section_nav_keyboard(),
     )
+
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -357,7 +351,8 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update,
             f"=== {window} SNAPSHOT ===\n\n"
             + snapshot_to_text(snap)
-            + "\n\nInterpretation available in Risk Log channel."
+            + "\n\nInterpretation available in Risk Log channel.",
+            reply_markup=section_nav_keyboard(),
         )
         return
 
@@ -377,7 +372,11 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if persistence_block is not None:
         text += persistence_block + "\n\n"
 
-    await safe_reply(update, text + "Interpretation available in Risk Log channel.")
+    await safe_reply(
+        update,
+        text + "Interpretation available in Risk Log channel.",
+        reply_markup=section_nav_keyboard(),
+    )
 
 async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # -------- ACTIVE STATES (1h) --------
@@ -418,7 +417,7 @@ async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text += "• none\n"
 
-    await safe_reply(update, text)
+    await safe_reply(update, text, reply_markup=section_nav_keyboard())
 
 
 def can_send_alert(symbol, div_type, event_ts):
@@ -500,8 +499,8 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await safe_reply(
         update,
-        text
-        + "Interpretation available in Risk Log channel."
+        text + "Interpretation available in Risk Log channel.",
+        reply_markup=section_nav_keyboard(),
     )
 
 
@@ -560,7 +559,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if persistence_block is not None:
         text += "\n" + persistence_block
 
-    await safe_reply(update, text)
+    await safe_reply(update, text, reply_markup=section_nav_keyboard())
 
 
 async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -582,7 +581,7 @@ async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += f"12h ↔ 1h: {data['volatility']['12h_1h']}\n"
     text += f"6h  ↔ 1h: {data['volatility']['6h_1h']}"
 
-    await safe_reply(update, text)
+    await safe_reply(update, text, reply_markup=section_nav_keyboard())
 
 
 logger = logging.getLogger(__name__)
@@ -644,7 +643,8 @@ async def context(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(
         update,
         "Market context is published daily\n"
-        "in the Risk Log channel."
+        "in the Risk Log channel.",
+        reply_markup=section_nav_keyboard(),
     )
 
 def format_scope():
@@ -659,31 +659,10 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
-    if data == "main:menu":
+    if data in {"main:menu", "help:back"}:
         await query.edit_message_text(
             "Main menu:",
             reply_markup=main_menu_keyboard(),
-        )
-        return
-
-    if data == "main:commands":
-        await query.edit_message_text(
-            "Available commands:",
-            reply_markup=help_keyboard(),
-        )
-        return
-
-    if data == "main:information":
-        await query.edit_message_text(
-            INFO_TEXT,
-            reply_markup=info_keyboard(),
-        )
-        return
-
-    if data == "help:back":
-        await query.edit_message_text(
-            "Available commands:",
-            reply_markup=help_keyboard(),
         )
         return
 
@@ -702,7 +681,8 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             ],
             [
-                InlineKeyboardButton("⬅ Back", callback_data="help:back"),
+                InlineKeyboardButton("⬅ Back", callback_data="main:menu"),
+                InlineKeyboardButton("Menu", callback_data="main:menu"),
             ],
         ]
         await query.edit_message_text(
@@ -730,7 +710,10 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for t in sorted(SUPPORTED_TICKERS)
         ]
         keyboard.append(
-            [InlineKeyboardButton("⬅ Back", callback_data="help:back")]
+            [
+                InlineKeyboardButton("⬅ Back", callback_data="main:menu"),
+                InlineKeyboardButton("Menu", callback_data="main:menu"),
+            ]
         )
         await query.edit_message_text(
             "Select ticker:",
@@ -750,15 +733,15 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await lock_menu(query, "⏳ Loading alerts…")
         await alerts(update, context)
         return
-    elif data == "run:event":
+    if data == "run:event":
         await lock_menu(query, "⏳ Loading event…")
         await event(update, context)
         return
-    elif data == "run:dispersion":
+    if data == "run:dispersion":
         await lock_menu(query, "⏳ Loading dispersion…")
         await dispersion(update, context)
         return
-    elif data == "run:context":
+    if data == "run:context":
         await lock_menu(query, "⏳ Loading context…")
         await context(update, context)
         return
