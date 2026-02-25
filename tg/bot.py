@@ -224,7 +224,11 @@ def split_text_chunks(text: str, chunk_size: int = MAX_TELEGRAM_TEXT_LEN):
     return chunks or [""]
 
 
-async def safe_reply(update: Update, text: str):
+async def safe_reply(
+    update: Update,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+):
     target = None
 
     if update.message:
@@ -235,12 +239,16 @@ async def safe_reply(update: Update, text: str):
     if not target:
         return
 
-    for chunk in split_text_chunks(text):
+    chunks = split_text_chunks(text)
+    markup = reply_markup if reply_markup is not None else main_menu_keyboard()
+
+    for idx, chunk in enumerate(chunks):
+        current_markup = markup if idx == len(chunks) - 1 else None
         try:
-            await target.reply_text(chunk)
+            await target.reply_text(chunk, reply_markup=current_markup)
         except TimedOut:
             await asyncio.sleep(1)
-            await target.reply_text(chunk)
+            await target.reply_text(chunk, reply_markup=current_markup)
 
 
 async def run_data_task(update: Update, task_name: str, fn, *args, **kwargs):
