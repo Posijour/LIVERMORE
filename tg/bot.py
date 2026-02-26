@@ -15,6 +15,8 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 from trend.state_evolution import analyze_state_evolution
@@ -63,6 +65,12 @@ def menu_button_keyboard():
     ])
 
 
+def start_inline_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("▶ Start", callback_data="main:start")],
+    ])
+
+
 def main_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 Stats", callback_data="help:stats")],
@@ -70,7 +78,7 @@ def main_menu_keyboard():
         [InlineKeyboardButton("⚠️ Alerts", callback_data="run:alerts")],
         [InlineKeyboardButton("📍 Event", callback_data="run:event")],
         [InlineKeyboardButton("📈 Dispersion", callback_data="run:dispersion")],
-        [InlineKeyboardButton("🌐 Context", callback_data="run:context")],
+        [InlineKeyboardButton("ℹ️ Information", callback_data="run:information")],
     ])
 
 
@@ -79,6 +87,7 @@ def section_nav_keyboard():
         [
             InlineKeyboardButton("⬅ Back", callback_data="main:menu"),
             InlineKeyboardButton("Menu", callback_data="main:menu"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="main:refresh"),
         ],
     ])
 
@@ -306,10 +315,55 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
 
+    context.user_data["is_started"] = True
+    context.user_data["last_action"] = None
+
     await update.message.reply_text(
         "Market observer online.",
         reply_markup=menu_button_keyboard(),
     )
+
+
+async def ensure_started(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("is_started"):
+        return
+
+    context.user_data["is_started"] = False
+    if update.message:
+        await update.message.reply_text(
+            "Press Start to begin.",
+            reply_markup=start_inline_keyboard(),
+        )
+
+
+def remember_last_action(context: ContextTypes.DEFAULT_TYPE, action: str, args: list[str] | None = None):
+    context.user_data["last_action"] = {"action": action, "args": args or []}
+
+
+async def run_last_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    last_action = context.user_data.get("last_action")
+    if not last_action:
+        await safe_reply(update, "Nothing to refresh yet.", reply_markup=section_nav_keyboard())
+        return
+
+    action = last_action.get("action")
+    args = last_action.get("args", [])
+    context.args = list(args)
+
+    if action == "stats":
+        await stats(update, context)
+    elif action == "status":
+        await status(update, context)
+    elif action == "alerts":
+        await alerts(update, context)
+    elif action == "event":
+        await event(update, context)
+    elif action == "dispersion":
+        await dispersion(update, context)
+    elif action == "information":
+        await information(update, context)
+    else:
+        await safe_reply(update, "Nothing to refresh yet.", reply_markup=section_nav_keyboard())
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -326,14 +380,22 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
 
+    remember_last_action(context, "information")
+
     await update.message.reply_text(
         INFO_TEXT,
         reply_markup=section_nav_keyboard(),
     )
 
 
+async def information(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    remember_last_action(context, "information")
+    await safe_reply(update, INFO_TEXT, reply_markup=section_nav_keyboard())
+
+
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
+    remember_last_action(context, "stats", args)
 
     if not args:
         await safe_reply(update, "Usage: /stats 1h or /stats 12h 6h 1h")
@@ -379,6 +441,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    remember_last_action(context, "alerts")
     # -------- ACTIVE STATES (1h) --------
     ts_from, ts_to = parse_window("1h")
     snap = await run_data_task(update, "alerts snapshot", run_snapshot, ts_from, ts_to)
@@ -434,6 +497,7 @@ def can_send_alert(symbol, div_type, event_ts):
     return True
 
 async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    remember_last_action(context, "event")
     # 1. Берём последнюю дивергенцию
     ts_from, ts_to = parse_window("4h")
     rows = await run_data_task(update, "event divergence", load_divergence, ts_from, ts_to)
@@ -505,6 +569,7 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    remember_last_action(context, "status", context.args)
     if not context.args:
         await safe_reply(update, "Usage: /status BTCUSDT")
         return
@@ -563,6 +628,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    remember_last_action(context, "dispersion")
     data = await run_data_task(update, "dispersion", compute_dispersion)
     if data is None:
         return
@@ -639,14 +705,6 @@ async def divergence_watcher_job(context: ContextTypes.DEFAULT_TYPE):
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.exception("Telegram update handling failed", exc_info=context.error)
 
-async def context(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await safe_reply(
-        update,
-        "Market context is published daily\n"
-        "in the Risk Log channel.",
-        reply_markup=section_nav_keyboard(),
-    )
-
 def format_scope():
     lines = ["Scope:"]
     lines.append(f"• Futures: {DATA_SCOPE['futures']}")
@@ -664,6 +722,20 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Main menu:",
             reply_markup=main_menu_keyboard(),
         )
+        return
+
+    if data == "main:start":
+        context.user_data["is_started"] = True
+        context.user_data["last_action"] = None
+        await query.edit_message_text(
+            "Market observer online.",
+            reply_markup=menu_button_keyboard(),
+        )
+        return
+
+    if data == "main:refresh":
+        await lock_menu(query, "⏳ Refreshing…")
+        await run_last_action(update, context)
         return
 
     # ---------- STATS ----------
@@ -700,15 +772,23 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ---------- STATUS ----------
     if data == "help:status":
-        keyboard = [
-            [
+        tickers = sorted(SUPPORTED_TICKERS)
+        keyboard = []
+        for idx in range(0, len(tickers), 2):
+            row = [
                 InlineKeyboardButton(
-                    t.replace("USDT", ""),
-                    callback_data=f"status:{t}",
+                    tickers[idx].replace("USDT", ""),
+                    callback_data=f"status:{tickers[idx]}",
                 )
             ]
-            for t in sorted(SUPPORTED_TICKERS)
-        ]
+            if idx + 1 < len(tickers):
+                row.append(
+                    InlineKeyboardButton(
+                        tickers[idx + 1].replace("USDT", ""),
+                        callback_data=f"status:{tickers[idx + 1]}",
+                    )
+                )
+            keyboard.append(row)
         keyboard.append(
             [
                 InlineKeyboardButton("⬅ Back", callback_data="main:menu"),
@@ -741,9 +821,9 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await lock_menu(query, "⏳ Loading dispersion…")
         await dispersion(update, context)
         return
-    if data == "run:context":
-        await lock_menu(query, "⏳ Loading context…")
-        await context(update, context)
+    if data == "run:information":
+        await lock_menu(query, "⏳ Loading information…")
+        await information(update, context)
         return
 
 # ---------------- RUN ----------------
@@ -768,8 +848,9 @@ def run_bot():
         app.add_handler(CommandHandler("alerts", alerts))
         app.add_handler(CommandHandler("event", event))
         app.add_handler(CommandHandler("status", status))
-        app.add_handler(CommandHandler("context", context))
+        app.add_handler(CommandHandler("context", info_cmd))
         app.add_handler(CommandHandler("dispersion", dispersion))
+        app.add_handler(MessageHandler(filters.ALL, ensure_started))
         app.add_handler(CallbackQueryHandler(help_callback))
         app.add_error_handler(on_error)
 
@@ -795,3 +876,5 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+    remember_last_action(context, "help")
+    remember_last_action(context, "stats", args)
