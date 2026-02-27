@@ -301,28 +301,52 @@ def render_options_snapshot(window: str, payload: dict) -> str:
     okx = payload.get("okx", {})
     deribit = payload.get("deribit", {})
 
+    # ---- helpers ----
+    def arrow(value):
+        if not isinstance(value, (int, float)):
+            return ""
+        return "↑" if value > 0 else "↓" if value < 0 else "→"
+
+    def liquidity_label(phase):
+        if phase in ("THIN", "LOW"):
+            return "THIN"
+        if phase in ("RICH", "HIGH"):
+            return "RICH"
+        return _fmt_text(phase)
+
+    term_structure = (
+        "flat"
+        if isinstance(deribit.get("iv_slope"), (int, float))
+        and abs(deribit.get("iv_slope")) < 0.3
+        else "contango"
+        if isinstance(deribit.get("iv_slope"), (int, float))
+        and deribit.get("iv_slope") > 0
+        else "backwardation"
+        if isinstance(deribit.get("iv_slope"), (int, float))
+        else "N/A"
+    )
+
     return (
-        f"=== OPTIONS SNAPSHOT [{window}] ===\n\n"
-        "Bybit (Behavior):\n"
-        f"• Regime: {_fmt_text(bybit.get('regime'))}\n"
-        f"• MCI: {_fmt_number(bybit.get('mci'))}\n"
-        f"• MCI slope: {_fmt_number(bybit.get('mci_slope'), signed=True)}\n"
-        f"• Phase: {_fmt_text(bybit.get('mci_phase'))} (conf {_fmt_number(bybit.get('mci_phase_confidence'))})\n"
-        f"• Phase probs: {_fmt_text(bybit.get('mci_phase_prob_top1'))} | {_fmt_text(bybit.get('mci_phase_prob_top2'))}\n\n"
-        "OKX (Liquidity):\n"
-        f"• OLSI: {_fmt_number(okx.get('okx_olsi'))}\n"
-        f"• OLSI avg: {_fmt_number(okx.get('okx_olsi_avg'))}\n"
-        f"• OLSI slope: {_fmt_number(okx.get('okx_olsi_slope'), signed=True)}\n"
-        f"• Liquidity phase: {_fmt_text(okx.get('liquidity_phase'))}\n\n"
-        "Divergence (Bybit ↔ OKX):\n"
-        f"• Type: {_fmt_text(okx.get('divergence'))}\n"
-        f"• Diff: {_fmt_number(okx.get('divergence_diff'))}\n"
-        f"• Strength: {_fmt_text(okx.get('divergence_strength_class'))}\n\n"
+        f"=== OPTIONS SNAPSHOT ({window}) ===\n\n"
+
+        "Behavior (Bybit):\n"
+        f"• Regime: {_fmt_text(bybit.get('mci_phase'))} "
+        f"(conf {_fmt_number(bybit.get('mci_phase_confidence'), 2)})\n"
+        f"• MCI: {_fmt_number(bybit.get('mci'), 2)} "
+        f"({arrow(bybit.get('mci_slope'))})\n\n"
+
+        "Liquidity (OKX):\n"
+        f"• Liquidity: {liquidity_label(okx.get('liquidity_phase'))}\n"
+        f"• OLSI: {_fmt_number(okx.get('okx_olsi'), 2)} "
+        f"({arrow(okx.get('okx_olsi_slope'))})\n\n"
+
+        "Mismatch:\n"
+        f"• Bybit ↔ OKX: {_fmt_text(okx.get('divergence'))} "
+        f"({_fmt_text(okx.get('divergence_strength_class'))})\n\n"
+
         "Volatility Background (Deribit):\n"
         f"• VBI: {_fmt_text(deribit.get('vbi_state'))}\n"
-        f"• IV slope: {_fmt_number(deribit.get('iv_slope'), signed=True)}\n"
-        f"• Term structure: {_derive_term_structure(deribit.get('iv_slope'), deribit.get('curvature'))}\n"
-        f"• Skew: {_fmt_number(deribit.get('skew'), signed=True)}"
+        f"• Term structure: {term_structure}"
     )
 
 
@@ -1051,3 +1075,4 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
