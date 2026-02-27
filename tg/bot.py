@@ -485,7 +485,7 @@ def remember_last_action(context: ContextTypes.DEFAULT_TYPE, action: str, args: 
 async def run_last_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     last_action = context.user_data.get("last_action")
     if not last_action:
-        await safe_reply(update, "Nothing to refresh yet.", reply_markup=section_nav_keyboard(context)())
+        await safe_reply(update, "Nothing to refresh yet.", reply_markup=section_nav_keyboard(context))
         return
 
     action = last_action.get("action")
@@ -507,7 +507,7 @@ async def run_last_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "information":
         await information(update, context)
     else:
-        await safe_reply(update, "Nothing to refresh yet.", reply_markup=section_nav_keyboard(context)())
+        await safe_reply(update, "Nothing to refresh yet.", reply_markup=section_nav_keyboard(context))
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -528,13 +528,13 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         INFO_TEXT,
-        reply_markup=section_nav_keyboard(context)(),
+        reply_markup=section_nav_keyboard(context),
     )
 
 
 async def information(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_action(context, "information")
-    await safe_reply(update, INFO_TEXT, reply_markup=section_nav_keyboard(context)())
+    await safe_reply(update, INFO_TEXT, reply_markup=section_nav_keyboard(context))
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -558,7 +558,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"=== {window} SNAPSHOT ===\n\n"
             + snapshot_to_text(snap)
             + "\n\nInterpretation available in Risk Log channel.",
-            reply_markup=section_nav_keyboard(context)(),
+            reply_markup=section_nav_keyboard(context),
         )
         return
 
@@ -581,7 +581,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(
         update,
         text + "Interpretation available in Risk Log channel.",
-        reply_markup=section_nav_keyboard(context)(),
+        reply_markup=section_nav_keyboard(context),
     )
 
 async def options(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -627,7 +627,7 @@ async def options(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     aggregated = aggregate_options_snapshot(bybit_rows, okx_rows, deribit_rows)
     text = render_options_snapshot(window, aggregated)
-    await safe_reply(update, text, reply_markup=section_nav_keyboard(context)())
+    await safe_reply(update, text, reply_markup=section_nav_keyboard(context))
 
 
 async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -670,7 +670,7 @@ async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text += "• none\n"
 
-    await safe_reply(update, text, reply_markup=section_nav_keyboard(context)())
+    await safe_reply(update, text, reply_markup=section_nav_keyboard(context))
 
 
 def can_send_alert(symbol, div_type, event_ts):
@@ -754,7 +754,7 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(
         update,
         text + "Interpretation available in Risk Log channel.",
-        reply_markup=section_nav_keyboard(context)(),
+        reply_markup=section_nav_keyboard(context),
     )
 
 
@@ -814,7 +814,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if persistence_block is not None:
         text += "\n" + persistence_block
 
-    await safe_reply(update, text, reply_markup=section_nav_keyboard(context)())
+    await safe_reply(update, text, reply_markup=section_nav_keyboard(context))
 
 
 async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -837,7 +837,7 @@ async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += f"12h ↔ 1h: {data['volatility']['12h_1h']}\n"
     text += f"6h  ↔ 1h: {data['volatility']['6h_1h']}"
 
-    await safe_reply(update, text, reply_markup=section_nav_keyboard(context)())
+    await safe_reply(update, text, reply_markup=section_nav_keyboard(context))
 
 
 logger = logging.getLogger(__name__)
@@ -1096,3 +1096,4 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
