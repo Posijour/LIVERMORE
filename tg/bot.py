@@ -326,25 +326,44 @@ def render_options_snapshot(window: str, payload: dict) -> str:
         else "N/A"
     )
 
+    confidence_label = (
+        "LOW"
+        if isinstance(bybit.get("mci_phase_confidence"), (int, float))
+        and bybit.get("mci_phase_confidence") < 0.30
+        else "WEAK"
+        if isinstance(bybit.get("mci_phase_confidence"), (int, float))
+        and bybit.get("mci_phase_confidence") < 0.50
+        else "MODERATE"
+        if isinstance(bybit.get("mci_phase_confidence"), (int, float))
+        and bybit.get("mci_phase_confidence") < 0.70
+        else "HIGH"
+        if isinstance(bybit.get("mci_phase_confidence"), (int, float))
+        and bybit.get("mci_phase_confidence") < 0.85
+        else "VERY_HIGH"
+        if isinstance(bybit.get("mci_phase_confidence"), (int, float))
+        else "N/A"
+    )
+
     return (
         f"=== OPTIONS SNAPSHOT ({window}) ===\n\n"
 
         "Behavior (Bybit):\n"
-        f"• Regime: {_fmt_text(bybit.get('mci_phase'))} "
-        f"(conf {_fmt_number(bybit.get('mci_phase_confidence'), 2)})\n"
+        f"• Regime: {_fmt_text(bybit.get('mci_phase'))}\n "
+        f"Confidence: {_fmt_number(bybit.get('mci_phase_confidence') | {confidence_label}, 2)}\n"
         f"• MCI: {_fmt_number(bybit.get('mci'), 2)} "
         f"({arrow(bybit.get('mci_slope'))})\n\n"
 
         "Liquidity (OKX):\n"
         f"• Liquidity: {liquidity_label(okx.get('liquidity_phase'))}\n"
         f"• OLSI: {_fmt_number(okx.get('okx_olsi'), 2)} "
-        f"({arrow(okx.get('okx_olsi_slope'))})\n\n"
+        f"({arrow(okx.get('okx_olsi_slope'))})\n"
+        f"• Liquidity phase: {_fmt_text(okx.get('liquidity_phase'))}\n\n"
 
-        "Mismatch:\n"
-        f"• Bybit ↔ OKX: {_fmt_text(okx.get('divergence'))} "
-        f"({_fmt_text(okx.get('divergence_strength_class'))})\n\n"
+        "Mismatch (Bybit ↔ OKX):\n"
+        f"{_fmt_text(okx.get('divergence'))}\n "
+        f"Strength: {_fmt_text(okx.get('divergence_strength_class'))}\n\n"
 
-        "Volatility Background (Deribit):\n"
+        "Volatility (Deribit):\n"
         f"• VBI: {_fmt_text(deribit.get('vbi_state'))}\n"
         f"• Term structure: {term_structure}"
     )
@@ -1075,4 +1094,5 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
