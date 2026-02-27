@@ -360,8 +360,8 @@ def render_options_snapshot(window: str, payload: dict) -> str:
         f"• Liquidity phase: {_fmt_text(okx.get('liquidity_phase'))}\n\n"
 
         "Mismatch (Bybit ↔ OKX):\n"
-        f"{_fmt_text(okx.get('divergence'))}\n"
-        f"Strength: {_fmt_text(okx.get('divergence_strength_class'))}\n\n"
+        f"• {_fmt_text(okx.get('divergence'))}\n"
+        f"• Strength: {_fmt_text(okx.get('divergence_strength_class'))}\n\n"
 
         "Volatility (Deribit):\n"
         f"• VBI: {_fmt_text(deribit.get('vbi_state'))}\n"
@@ -1093,6 +1093,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
