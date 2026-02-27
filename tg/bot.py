@@ -89,7 +89,7 @@ def section_nav_keyboard(context):
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("⬅ Back", callback_data=back_target),
-            InlineKeyboardButton("Menu", callback_data="main:menu"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="main:refresh"),
         ],
     ])
 
@@ -1096,4 +1096,5 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
