@@ -348,7 +348,7 @@ def render_options_snapshot(window: str, payload: dict) -> str:
         f"=== OPTIONS SNAPSHOT ({window}) ===\n\n"
 
         "Behavior (Bybit):\n"
-        f"• Regime: {_fmt_text(bybit.get('mci_phase'))}\n "
+        f"• Regime: {_fmt_text(bybit.get('mci_phase'))}\n"
         f"• Confidence: {_fmt_number(bybit.get('mci_phase_confidence'), 2)} ({confidence_label})\n"
         f"• MCI: {_fmt_number(bybit.get('mci'), 2)} "
         f"({arrow(bybit.get('mci_slope'))})\n\n"
@@ -360,7 +360,7 @@ def render_options_snapshot(window: str, payload: dict) -> str:
         f"• Liquidity phase: {_fmt_text(okx.get('liquidity_phase'))}\n\n"
 
         "Mismatch (Bybit ↔ OKX):\n"
-        f"{_fmt_text(okx.get('divergence'))}\n "
+        f"{_fmt_text(okx.get('divergence'))}\n"
         f"Strength: {_fmt_text(okx.get('divergence_strength_class'))}\n\n"
 
         "Volatility (Deribit):\n"
@@ -971,7 +971,6 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [
                 InlineKeyboardButton("⬅ Back", callback_data="main:menu"),
                 InlineKeyboardButton("Menu", callback_data="main:menu"),
-                InlineKeyboardButton("🔄 Refresh", callback_data="main:refresh"),
             ],
         ]
         await query.edit_message_text(
@@ -1094,6 +1093,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
