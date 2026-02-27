@@ -6,7 +6,7 @@ from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
 from trend.event_anchored import event_anchored_analysis
 from time_utils import parse_window
-from data.queries import load_divergence
+from data.queries import load_deribit, load_divergence, load_okx_olsi, load_options
 from main import persist_snapshot_state, run_snapshot
 from persistence.state_history import get_state_persistence_hours
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -75,6 +75,7 @@ def main_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 Stats", callback_data="help:stats")],
         [InlineKeyboardButton("🧠 Status (ticker)", callback_data="help:status")],
+        [InlineKeyboardButton("🧩 Options", callback_data="help:options")],
         [InlineKeyboardButton("⚠️ Alerts", callback_data="run:alerts")],
         [InlineKeyboardButton("📍 Event", callback_data="run:event")],
         [InlineKeyboardButton("📈 Dispersion", callback_data="run:dispersion")],
@@ -227,6 +228,104 @@ def split_text_chunks(text: str, chunk_size: int = MAX_TELEGRAM_TEXT_LEN):
     return chunks or [""]
 
 
+def _avg(rows: list[dict], field: str) -> float | None:
+    values = [r.get("data", {}).get(field) for r in rows]
+    numeric = [float(v) for v in values if isinstance(v, (int, float))]
+    if not numeric:
+        return None
+    return sum(numeric) / len(numeric)
+
+
+def _mode(rows: list[dict], field: str):
+    values = [r.get("data", {}).get(field) for r in rows]
+    values = [v for v in values if v not in (None, "")]
+    if not values:
+        return None
+    return max(set(values), key=values.count)
+
+
+def _latest(rows: list[dict], field: str):
+    if not rows:
+        return None
+    latest_row = max(rows, key=lambda r: r.get("ts", 0))
+    return latest_row.get("data", {}).get(field)
+
+
+def _fmt_number(value, digits: int = 3, signed: bool = False) -> str:
+    if value is None or not isinstance(value, (int, float)):
+        return "N/A"
+    return f"{value:+.{digits}f}" if signed else f"{value:.{digits}f}"
+
+
+def _fmt_text(value) -> str:
+    return "N/A" if value in (None, "") else str(value)
+
+
+def _derive_term_structure(iv_slope, curvature) -> str:
+    if not isinstance(iv_slope, (int, float)) or not isinstance(curvature, (int, float)):
+        return "N/A"
+    return f"iv_slope={iv_slope:+.3f}, curvature={curvature:+.3f}"
+
+
+def aggregate_options_snapshot(bybit_rows: list[dict], okx_rows: list[dict], deribit_rows: list[dict]) -> dict:
+    return {
+        "bybit": {
+            "regime": _mode(bybit_rows, "regime"),
+            "mci": _avg(bybit_rows, "mci"),
+            "mci_slope": _avg(bybit_rows, "mci_slope"),
+            "mci_phase": _mode(bybit_rows, "mci_phase"),
+            "mci_phase_confidence": _avg(bybit_rows, "mci_phase_confidence"),
+            "mci_phase_prob_top1": _latest(bybit_rows, "mci_phase_prob_top1"),
+            "mci_phase_prob_top2": _latest(bybit_rows, "mci_phase_prob_top2"),
+        },
+        "okx": {
+            "okx_olsi": _avg(okx_rows, "okx_olsi"),
+            "okx_olsi_avg": _avg(okx_rows, "okx_olsi_avg"),
+            "okx_olsi_slope": _avg(okx_rows, "okx_olsi_slope"),
+            "liquidity_phase": _mode(okx_rows, "liquidity_phase"),
+            "divergence": _mode(okx_rows, "divergence"),
+            "divergence_diff": _avg(okx_rows, "divergence_diff"),
+            "divergence_strength_class": _mode(okx_rows, "divergence_strength_class"),
+        },
+        "deribit": {
+            "vbi_state": _mode(deribit_rows, "vbi_state"),
+            "iv_slope": _avg(deribit_rows, "iv_slope"),
+            "curvature": _avg(deribit_rows, "curvature"),
+            "skew": _latest(deribit_rows, "skew"),
+        },
+    }
+
+
+def render_options_snapshot(window: str, payload: dict) -> str:
+    bybit = payload.get("bybit", {})
+    okx = payload.get("okx", {})
+    deribit = payload.get("deribit", {})
+
+    return (
+        f"=== OPTIONS SNAPSHOT [{window}] ===\n\n"
+        "Bybit (Behavior):\n"
+        f"• Regime: {_fmt_text(bybit.get('regime'))}\n"
+        f"• MCI: {_fmt_number(bybit.get('mci'))}\n"
+        f"• MCI slope: {_fmt_number(bybit.get('mci_slope'), signed=True)}\n"
+        f"• Phase: {_fmt_text(bybit.get('mci_phase'))} (conf {_fmt_number(bybit.get('mci_phase_confidence'))})\n"
+        f"• Phase probs: {_fmt_text(bybit.get('mci_phase_prob_top1'))} | {_fmt_text(bybit.get('mci_phase_prob_top2'))}\n\n"
+        "OKX (Liquidity):\n"
+        f"• OLSI: {_fmt_number(okx.get('okx_olsi'))}\n"
+        f"• OLSI avg: {_fmt_number(okx.get('okx_olsi_avg'))}\n"
+        f"• OLSI slope: {_fmt_number(okx.get('okx_olsi_slope'), signed=True)}\n"
+        f"• Liquidity phase: {_fmt_text(okx.get('liquidity_phase'))}\n\n"
+        "Divergence (Bybit ↔ OKX):\n"
+        f"• Type: {_fmt_text(okx.get('divergence'))}\n"
+        f"• Diff: {_fmt_number(okx.get('divergence_diff'))}\n"
+        f"• Strength: {_fmt_text(okx.get('divergence_strength_class'))}\n\n"
+        "Volatility Background (Deribit):\n"
+        f"• VBI: {_fmt_text(deribit.get('vbi_state'))}\n"
+        f"• IV slope: {_fmt_number(deribit.get('iv_slope'), signed=True)}\n"
+        f"• Term structure: {_derive_term_structure(deribit.get('iv_slope'), deribit.get('curvature'))}\n"
+        f"• Skew: {_fmt_number(deribit.get('skew'), signed=True)}"
+    )
+
+
 async def safe_reply(
     update: Update,
     text: str,
@@ -354,6 +453,8 @@ async def run_last_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await stats(update, context)
     elif action == "status":
         await status(update, context)
+    elif action == "options":
+        await options(update, context)
     elif action == "alerts":
         await alerts(update, context)
     elif action == "event":
@@ -439,6 +540,52 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text + "Interpretation available in Risk Log channel.",
         reply_markup=section_nav_keyboard(),
     )
+
+async def options(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    window = args[0] if args else "1h"
+    remember_last_action(context, "options", [window])
+
+    if window not in {"1h", "6h", "12h"}:
+        await safe_reply(update, "Usage: /options [1h|6h|12h]")
+        return
+
+    ts_from, ts_to = parse_window(window)
+
+    bybit_rows = await run_data_task(
+        update,
+        "options bybit",
+        load_options,
+        ts_from,
+        ts_to,
+    )
+    if bybit_rows is None:
+        return
+
+    okx_rows = await run_data_task(
+        update,
+        "options okx",
+        load_okx_olsi,
+        ts_from,
+        ts_to,
+    )
+    if okx_rows is None:
+        return
+
+    deribit_rows = await run_data_task(
+        update,
+        "options deribit",
+        load_deribit,
+        ts_from,
+        ts_to,
+    )
+    if deribit_rows is None:
+        return
+
+    aggregated = aggregate_options_snapshot(bybit_rows, okx_rows, deribit_rows)
+    text = render_options_snapshot(window, aggregated)
+    await safe_reply(update, text, reply_markup=section_nav_keyboard())
+
 
 async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_action(context, "alerts")
@@ -770,6 +917,33 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await stats(update, context)
         return
 
+    # ---------- OPTIONS ----------
+    if data == "help:options":
+        keyboard = [
+            [
+                InlineKeyboardButton("1h", callback_data="options:1h"),
+                InlineKeyboardButton("6h", callback_data="options:6h"),
+                InlineKeyboardButton("12h", callback_data="options:12h"),
+            ],
+            [
+                InlineKeyboardButton("⬅ Back", callback_data="main:menu"),
+                InlineKeyboardButton("Menu", callback_data="main:menu"),
+                InlineKeyboardButton("🔄 Refresh", callback_data="main:refresh"),
+            ],
+        ]
+        await query.edit_message_text(
+            "Options windows:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
+    if data.startswith("options:"):
+        await lock_menu(query, "⏳ Loading options…")
+        window = data.split(":", 1)[1]
+        context.args = [window]
+        await options(update, context)
+        return
+
     # ---------- STATUS ----------
     if data == "help:status":
         tickers = sorted(SUPPORTED_TICKERS)
@@ -845,6 +1019,7 @@ def run_bot():
         app.add_handler(CommandHandler("help", help_cmd))
         app.add_handler(CommandHandler(["info", "information"], info_cmd))
         app.add_handler(CommandHandler("stats", stats))
+        app.add_handler(CommandHandler("options", options))
         app.add_handler(CommandHandler("alerts", alerts))
         app.add_handler(CommandHandler("event", event))
         app.add_handler(CommandHandler("status", status))
@@ -876,5 +1051,3 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
-    remember_last_action(context, "help")
-    remember_last_action(context, "stats", args)
