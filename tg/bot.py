@@ -349,7 +349,7 @@ def render_options_snapshot(window: str, payload: dict) -> str:
 
         "Behavior (Bybit):\n"
         f"• Regime: {_fmt_text(bybit.get('mci_phase'))}\n "
-        f"Confidence: {_fmt_number(bybit.get('mci_phase_confidence') | {confidence_label}, 2)}\n"
+        f"• Confidence: {_fmt_number(bybit.get('mci_phase_confidence'), 2)} ({confidence_label})\n"
         f"• MCI: {_fmt_number(bybit.get('mci'), 2)} "
         f"({arrow(bybit.get('mci_slope'))})\n\n"
 
@@ -1094,5 +1094,6 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
