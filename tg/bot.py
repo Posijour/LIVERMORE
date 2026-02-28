@@ -267,26 +267,26 @@ def _derive_term_structure(iv_slope, curvature) -> str:
     return f"iv_slope={iv_slope:+.3f}, curvature={curvature:+.3f}"
 
 
-def aggregate_options_snapshot(bybit_rows: list[dict], okx_rows: list[dict], deribit_rows: list[dict]) -> dict:
+def aggregate_options_snapshot(bybit_rows, okx_rows, deribit_rows) -> dict:
     return {
         "bybit": {
             "regime": _mode(bybit_rows, "regime"),
             "mci": _avg(bybit_rows, "mci"),
             "mci_slope": _avg(bybit_rows, "mci_slope"),
             "mci_phase": _mode(bybit_rows, "mci_phase"),
-            "confidence": _avg(bybit_rows, "confidence"),
+            "confidence": _latest(bybit_rows, "confidence"),
         },
         "okx": {
             "okx_olsi_avg": _avg(okx_rows, "okx_olsi_avg"),
-            "okx_olsi_slope": _avg(okx_rows, "okx_olsi_slope"),
+            "okx_olsi_slope": _latest(okx_rows, "okx_olsi_slope"),
             "okx_liquidity_regime": _mode(okx_rows, "okx_liquidity_regime"),
-            "divergence": _mode(okx_rows, "divergence"),
+            "divergence": _mode(okx_rows, "divergence_type"),
             "divergence_diff": _avg(okx_rows, "divergence_diff"),
             "divergence_strength": _avg(okx_rows, "divergence_strength"),
         },
         "deribit": {
             "vbi_state": _mode(deribit_rows, "vbi_state"),
-            "iv_slope": _avg(deribit_rows, "iv_slope"),
+            "iv_slope": _latest(deribit_rows, "iv_slope"),
             "curvature": _avg(deribit_rows, "curvature"),
             "skew": _latest(deribit_rows, "skew"),
         },
@@ -313,14 +313,10 @@ def render_options_snapshot(window: str, payload: dict) -> str:
 
     term_structure = (
         "flat"
-        if isinstance(deribit.get("iv_slope"), (int, float))
-        and abs(deribit.get("iv_slope")) < 0.3
-        else "contango"
-        if isinstance(deribit.get("iv_slope"), (int, float))
-        and deribit.get("iv_slope") > 0
-        else "backwardation"
-        if isinstance(deribit.get("iv_slope"), (int, float))
-        else "N/A"
+        if abs(iv_slope) < 0.3
+        else "upward"
+        if iv_slope > 0
+        else "downward"
     )
 
     confidence_label = (
@@ -1093,6 +1089,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
