@@ -25,6 +25,7 @@ MAX_TELEGRAM_TEXT_LEN = 4000
 # --- local anti-spam memory ---
 _LAST_ALERTS = {}  # (symbol, div_type) -> event_ts
 ALERT_COOLDOWN = 30 * 60  # 30 минут
+_PERSISTENCE_WARNING_EMITTED = False
 
 
 # ---------------- CONFIG ----------------
@@ -849,6 +850,7 @@ logger = logging.getLogger(__name__)
 
 
 async def divergence_watcher(app):
+    global _PERSISTENCE_WARNING_EMITTED
     from data.queries import load_divergence
     from time_utils import parse_window
 
@@ -858,7 +860,15 @@ async def divergence_watcher(app):
     try:
         await asyncio.to_thread(persist_snapshot_state, market_snapshot, None)
     except Exception as exc:
-        logger.warning("Snapshot persistence failed in watcher: %s", exc)
+        if isinstance(exc, NameError) and "ts" in str(exc):
+            if not _PERSISTENCE_WARNING_EMITTED:
+                logger.error(
+                    "Snapshot persistence code is outdated (NameError: ts). "
+                    "Deploy latest main.py and restart bot process."
+                )
+                _PERSISTENCE_WARNING_EMITTED = True
+        else:
+            logger.warning("Snapshot persistence failed in watcher: %s", exc)
 
     ts_from, ts_to = parse_window("2h")
     rows = await asyncio.to_thread(load_divergence, ts_from, ts_to)
@@ -1104,6 +1114,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
