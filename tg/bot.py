@@ -4,7 +4,6 @@ import time
 from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
-from trend.event_anchored import event_anchored_analysis
 from time_utils import parse_window
 from data.queries import load_deribit, load_divergence, load_okx_market_state, load_bybit_market_state
 from main import persist_snapshot_state, run_snapshot
@@ -684,6 +683,7 @@ def can_send_alert(symbol, div_type, event_ts):
     return True
 
 async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from trend.event_anchored import event_anchored_analysis
     remember_last_action(context, "event")
     # 1. Берём последнюю дивергенцию
     ts_from, ts_to = parse_window("4h")
@@ -1093,6 +1093,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
