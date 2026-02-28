@@ -5,9 +5,6 @@ client = SupabaseClient()
 def load_risk(ts_from, ts_to, symbol=None):
     return client.fetch("risk_eval", ts_from, ts_to, symbol=symbol)
 
-def load_options(ts_from, ts_to, symbol=None):
-    return client.fetch("options_ticker_cycle", ts_from, ts_to, symbol=symbol)
-
 def load_market_state(ts_from, ts_to):
     return client.fetch("options_market_state", ts_from, ts_to, symbol="MARKET")
 
