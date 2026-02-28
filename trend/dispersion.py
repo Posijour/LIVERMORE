@@ -40,7 +40,7 @@ def compute_dispersion():
         ts_from, ts_to = parse_window(w)
 
         risk = aggregate_risk(load_risk(ts_from, ts_to))
-        options = aggregate_options(load_options(ts_from, ts_to))
+        options = aggregate_options(load_okx_market_state(ts_from, ts_to))
         deribit = aggregate_deribit(load_deribit(ts_from, ts_to))
 
         if risk:
@@ -73,4 +73,5 @@ def compute_dispersion():
             "6h_1h": pair_dispersion(vol_vals, "6h", "1h", "categorical"),
         },
     }
+
 
