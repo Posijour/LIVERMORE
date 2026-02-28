@@ -20,7 +20,11 @@ def aggregate_options(rows: list[dict]) -> dict:
 
     data = [r["data"] for r in rows]
 
-    phases = [d.get("mci_phase") for d in data if d.get("mci_phase")]
+    phases = [
+        d.get("okx_liquidity_regime")
+        for d in data
+        if d.get("okx_liquidity_regime")
+    ]
 
     phase, pct = dominant(phases)
 
