@@ -20,18 +20,15 @@ def aggregate_options(rows: list[dict]) -> dict:
 
     data = [r["data"] for r in rows]
 
-    phases = [
+    regimes = [
         d.get("okx_liquidity_regime")
         for d in data
         if d.get("okx_liquidity_regime")
     ]
 
-    phase, pct = dominant(phases)
+    regime, pct = dominant(regimes)
 
     return {
-        "dominant_phase": phase,
+        "dominant_phase": regime,          # OKX liquidity regime
         "dominant_phase_pct": pct,
-        "mci_avg": avg((d.get("mci") for d in data), 2),
-        "mci_slope": avg((d.get("mci_slope") for d in data), 3),
-        "phase_divergence": any(d.get("phase_divergence") for d in data),
     }
