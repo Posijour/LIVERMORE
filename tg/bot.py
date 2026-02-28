@@ -137,7 +137,7 @@ def snapshot_to_text(snapshot):
         f"Struct: {o.get('dominant_phase_pct', 0):.1f}% "
         f"{o.get('dominant_phase')}\n"
         f"Vol: {v.get('vbi_state')} "
-        f"({v.v.get('iv_slope', 0):+.2f})\n"
+        f"({v.get('iv_slope', 0):+.2f})\n"
         f"Div: {d.get('count', 0)} | "
         f"{d.get('share', 0)}% | "
         f"{d.get('dominant_type')}"
@@ -1093,6 +1093,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
