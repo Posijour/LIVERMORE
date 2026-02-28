@@ -6,7 +6,7 @@ from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
 from trend.event_anchored import event_anchored_analysis
 from time_utils import parse_window
-from data.queries import load_deribit, load_divergence, load_market_state, load_options
+from data.queries import load_deribit, load_divergence, load_okx_market_state, load_bybit__market_state
 from main import persist_snapshot_state, run_snapshot
 from persistence.state_history import get_state_persistence_hours
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -598,7 +598,7 @@ async def options(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bybit_rows = await run_data_task(
         update,
         "options bybit",
-        load_options,
+        load_bybit_market_state
         ts_from,
         ts_to,
     )
@@ -608,7 +608,7 @@ async def options(update: Update, context: ContextTypes.DEFAULT_TYPE):
     okx_rows = await run_data_task(
         update,
         "options okx",
-        load_market_state,
+        load_okx_market_state,
         ts_from,
         ts_to,
     )
@@ -1096,6 +1096,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
