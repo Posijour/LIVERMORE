@@ -7,7 +7,7 @@ from aggregation.meta import aggregate_meta
 from aggregation.options import aggregate_options
 from aggregation.risk import aggregate_risk
 from config import DEFAULT_WINDOW_HOURS
-from data.queries import load_deribit, load_meta, load_options, load_risk
+from data.queries import load_deribit, load_meta, load_bybit_market_state, load_okx_market_state
 from interpretation.engine import interpret
 from interpretation.states import detect_states
 from models.snapshot import MarketSnapshot
