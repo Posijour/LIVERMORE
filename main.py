@@ -47,25 +47,6 @@ def aggregate_alert_divergence(rows):
     return alerts
 
 
-def run_snapshot(ts_from, ts_to, symbol: Optional[str] = None):
-    risk_rows = load_risk(ts_from, ts_to, symbol=symbol)
-    div_rows = load_divergence(ts_from, ts_to, symbol=symbol)
-
-    snapshot = MarketSnapshot(
-        ts_from=ts_from,
-        ts_to=ts_to,
-        risk=aggregate_risk(risk_rows),
-        options=aggregate_options(load_okx_market_state(ts_from, ts_to)),
-        deribit=aggregate_deribit(load_deribit(ts_from, ts_to, symbol=symbol)),
-        meta=aggregate_meta(load_meta(ts_from, ts_to, symbol=symbol)),
-    )
-
-    snapshot.interpretation = interpret(snapshot)
-    snapshot.active_states = detect_states(snapshot)
-    snapshot.divergence = aggregate_divergence(div_rows, risk_rows)
-
-    return snapshot
-
 
 def _risk_band(value: float | int | None, levels: tuple[float, float], labels: tuple[str, str, str]) -> str:
     if value is None:
@@ -80,53 +61,6 @@ def _risk_band(value: float | int | None, levels: tuple[float, float], labels: t
     if numeric > low:
         return mid_label
     return low_label
-
-
-def persist_snapshot_state(snapshot: MarketSnapshot, symbol: Optional[str] = None) -> None:
-    """
-    Persist current aggregate state for the latest ingestion cycle.
-    Inserts only when value changed (handled by record_state).
-    """
-    if snapshot.risk:
-        avg_risk = snapshot.risk.get("avg_risk")
-        risk_2plus_pct = snapshot.risk.get("risk_2plus_pct")
-
-        record_state(
-            layer="risk",
-            state_key="avg_risk",
-            state_value=_risk_band(
-                avg_risk,
-                levels=(0.7, 1.0),
-                labels=("LE_0_7", "GT_0_7", "GT_1_0"),
-            ),
-            symbol=symbol,
-        )
-        record_state(
-            layer="risk",
-            state_key="risk_2plus_pct",
-            state_value=_risk_band(
-                risk_2plus_pct,
-                levels=(20, 30),
-                labels=("LE_20", "GT_20", "GT_30"),
-            ),
-            symbol=symbol,
-        )
-
-    if snapshot.options:
-        record_state(
-            layer="structure",
-            state_key="dominant_phase",
-            state_value=str(snapshot.options.get("dominant_phase")),
-            symbol=symbol,
-        )
-
-    if snapshot.deribit:
-        record_state(
-            layer="volatility",
-            state_key="vbi_state",
-            state_value=str(snapshot.deribit.get("vbi_state")),
-            symbol=symbol,
-        )
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Build market snapshot from Supabase logs")
