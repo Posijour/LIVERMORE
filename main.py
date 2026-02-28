@@ -88,21 +88,17 @@ def persist_snapshot_state(snapshot, symbol):
     symbol   — None (market) или тикер (BTCUSDT и т.д.)
     """
 
-    from persistence.state_history import update_state_history
-
-    ts = snapshot.ts
-    scope = "market" if symbol is None else "symbol"
+    from persistence.state_history import record_state
 
     # -------- RISK --------
     if snapshot.risk:
         for key in ("avg_risk", "risk_2plus_pct"):
             value = snapshot.risk.get(key)
             if value is not None:
-                update_state_history(
-                    scope="risk",
+                record_state(
+                    layer="risk",
                     state_key=key,
                     state_value=str(value),
-                    ts=ts,
                     symbol=symbol,
                 )
 
@@ -110,11 +106,10 @@ def persist_snapshot_state(snapshot, symbol):
     if snapshot.options:
         phase = snapshot.options.get("dominant_phase")
         if phase:
-            update_state_history(
-                scope="structure",
+            record_state(
+                layer="structure"
                 state_key="dominant_phase",
                 state_value=str(phase),
-                ts=ts,
                 symbol=None,  # structure is market-wide
             )
 
@@ -122,8 +117,8 @@ def persist_snapshot_state(snapshot, symbol):
     if snapshot.deribit:
         vbi = snapshot.deribit.get("vbi_state")
         if vbi:
-            update_state_history(
-                scope="volatility",
+            record_state(
+                layer="volatility",
                 state_key="vbi_state",
                 state_value=str(vbi),
                 ts=ts,
