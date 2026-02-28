@@ -1,7 +1,7 @@
 from aggregation.risk import aggregate_risk
 from aggregation.options import aggregate_options
 from aggregation.deribit import aggregate_deribit
-from data.queries import load_deribit, load_options, load_risk
+from data.queries import load_deribit, load_bybit_market_state, load_okx_market_state, load_risk
 from time_utils import parse_window
 
 
@@ -73,3 +73,4 @@ def compute_dispersion():
             "6h_1h": pair_dispersion(vol_vals, "6h", "1h", "categorical"),
         },
     }
+
