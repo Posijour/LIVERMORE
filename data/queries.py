@@ -8,8 +8,8 @@ def load_risk(ts_from, ts_to, symbol=None):
 def load_options(ts_from, ts_to, symbol=None):
     return client.fetch("options_ticker_cycle", ts_from, ts_to, symbol=symbol)
 
-def load_okx_olsi(ts_from, ts_to, symbol=None):
-    return client.fetch("okx_olsi", ts_from, ts_to, symbol=symbol)
+def load_market_state(ts_from, ts_to):
+    return client.fetch("options_market_state", ts_from, ts_to, symbol="MARKET")
 
 def load_deribit(ts_from, ts_to, symbol=None):
     return client.fetch("deribit_vbi_snapshot", ts_from, ts_to, symbol=symbol)
