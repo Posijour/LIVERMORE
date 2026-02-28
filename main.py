@@ -92,15 +92,29 @@ def persist_snapshot_state(snapshot, symbol):
 
     # -------- RISK --------
     if snapshot.risk:
-        for key in ("avg_risk", "risk_2plus_pct"):
-            value = snapshot.risk.get(key)
-            if value is not None:
-                record_state(
-                    layer="risk",
-                    state_key=key,
-                    state_value=str(value),
-                    symbol=symbol,
-                )
+        avg_risk_band = _risk_band(
+            snapshot.risk.get("avg_risk"),
+            levels=(0.7, 1.0),
+            labels=("LE_0_7", "GT_0_7", "GT_1_0"),
+        )
+        riskact_band = _risk_band(
+            snapshot.risk.get("risk_2plus_pct"),
+            levels=(20.0, 30.0),
+            labels=("LE_20", "GT_20", "GT_30"),
+        )
+
+        record_state(
+            layer="risk",
+            state_key="avg_risk",
+            state_value=avg_risk_band,
+            symbol=symbol,
+        )
+        record_state(
+            layer="risk",
+            state_key="risk_2plus_pct",
+            state_value=riskact_band,
+            symbol=symbol,
+        )
 
     # -------- STRUCTURE (OPTIONS / OKX) --------
     if snapshot.options:
