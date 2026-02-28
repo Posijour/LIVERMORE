@@ -46,6 +46,24 @@ def aggregate_alert_divergence(rows):
 
     return alerts
 
+def run_snapshot(ts_from, ts_to, symbol: Optional[str] = None):
+    risk_rows = load_risk(ts_from, ts_to, symbol=symbol)
+    div_rows = load_divergence(ts_from, ts_to, symbol=symbol)
+
+    snapshot = MarketSnapshot(
+        ts_from=ts_from,
+        ts_to=ts_to,
+        risk=aggregate_risk(risk_rows),
+        options=aggregate_options(load_options(ts_from, ts_to, symbol=symbol)),
+        deribit=aggregate_deribit(load_deribit(ts_from, ts_to, symbol=symbol)),
+        meta=aggregate_meta(load_meta(ts_from, ts_to, symbol=symbol)),
+    )
+
+    snapshot.interpretation = interpret(snapshot)
+    snapshot.active_states = detect_states(snapshot)
+    snapshot.divergence = aggregate_divergence(div_rows, risk_rows)
+
+    return snapshot
 
 
 def _risk_band(value: float | int | None, levels: tuple[float, float], labels: tuple[str, str, str]) -> str:
@@ -61,6 +79,56 @@ def _risk_band(value: float | int | None, levels: tuple[float, float], labels: t
     if numeric > low:
         return mid_label
     return low_label
+
+def persist_snapshot_state(snapshot, symbol):
+    """
+    Persist snapshot states into state_history.
+
+    snapshot — объект Snapshot
+    symbol   — None (market) или тикер (BTCUSDT и т.д.)
+    """
+
+    from persistence.state_history import update_state_history
+
+    ts = snapshot.ts
+    scope = "market" if symbol is None else "symbol"
+
+    # -------- RISK --------
+    if snapshot.risk:
+        for key in ("avg_risk", "risk_2plus_pct"):
+            value = snapshot.risk.get(key)
+            if value is not None:
+                update_state_history(
+                    scope="risk",
+                    state_key=key,
+                    state_value=str(value),
+                    ts=ts,
+                    symbol=symbol,
+                )
+
+    # -------- STRUCTURE (OPTIONS / OKX) --------
+    if snapshot.options:
+        phase = snapshot.options.get("dominant_phase")
+        if phase:
+            update_state_history(
+                scope="structure",
+                state_key="dominant_phase",
+                state_value=str(phase),
+                ts=ts,
+                symbol=None,  # structure is market-wide
+            )
+
+    # -------- VOLATILITY (DERIBIT) --------
+    if snapshot.deribit:
+        vbi = snapshot.deribit.get("vbi_state")
+        if vbi:
+            update_state_history(
+                scope="volatility",
+                state_key="vbi_state",
+                state_value=str(vbi),
+                ts=ts,
+                symbol=None,  # vol is market-wide
+            )
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Build market snapshot from Supabase logs")
