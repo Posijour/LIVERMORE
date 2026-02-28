@@ -277,7 +277,6 @@ def aggregate_options_snapshot(bybit_rows: list[dict], okx_rows: list[dict], der
             "confidence": _avg(bybit_rows, "confidence"),
         },
         "okx": {
-            "okx_olsi": _avg(okx_rows, "okx_olsi"),
             "okx_olsi_avg": _avg(okx_rows, "okx_olsi_avg"),
             "okx_olsi_slope": _avg(okx_rows, "okx_olsi_slope"),
             "okx_liquidity_regime": _mode(okx_rows, "okx_liquidity_regime"),
@@ -347,13 +346,13 @@ def render_options_snapshot(window: str, payload: dict) -> str:
 
         "Behavior (Bybit):\n"
         f"• Regime: {_fmt_text(bybit.get('regime'))}\n"
-        f"• Confidence: {_fmt_number(bybit.get('mci_phase_confidence'), 2)} ({confidence_label})\n"
+        f"• Confidence: {_fmt_number(bybit.get('confidence'), 2)} ({confidence_label})\n"
         f"• MCI: {_fmt_number(bybit.get('mci'), 2)} "
         f"({arrow(bybit.get('mci_slope'))})\n\n"
 
         "Liquidity (OKX):\n"
         f"• Liquidity: {liquidity_label(okx.get('okx_liquidity_regime'))}\n"
-        f"• OLSI: {_fmt_number(okx.get('okx_olsi'), 2)} "
+        f"• OLSI: {_fmt_number(okx.get('okx_olsi_avg'), 2)} "
         f"({arrow(okx.get('okx_olsi_slope'))})\n"
         f"• Liquidity phase: {_fmt_text(okx.get('okx_liquidity_regime'))}\n\n"
 
@@ -1094,6 +1093,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
