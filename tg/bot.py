@@ -311,12 +311,16 @@ def render_options_snapshot(window: str, payload: dict) -> str:
             return "RICH"
         return _fmt_text(phase)
 
+    iv_slope = deribit.get("iv_slope")
+
     term_structure = (
         "flat"
-        if abs(iv_slope) < 0.3
+        if isinstance(iv_slope, (int, float)) and abs(iv_slope) < 0.3
         else "upward"
-        if iv_slope > 0
+        if isinstance(iv_slope, (int, float)) and iv_slope > 0
         else "downward"
+        if isinstance(iv_slope, (int, float))
+        else "N/A"
     )
 
     confidence_label = (
@@ -1089,6 +1093,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
