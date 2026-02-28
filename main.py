@@ -54,7 +54,7 @@ def run_snapshot(ts_from, ts_to, symbol: Optional[str] = None):
         ts_from=ts_from,
         ts_to=ts_to,
         risk=aggregate_risk(risk_rows),
-        options=aggregate_options(load_okx_market_state(ts_from, ts_to, symbol=symbol)),
+        options=aggregate_options(load_okx_market_state(ts_from, ts_to)),
         deribit=aggregate_deribit(load_deribit(ts_from, ts_to, symbol=symbol)),
         meta=aggregate_meta(load_meta(ts_from, ts_to, symbol=symbol)),
     )
@@ -107,7 +107,7 @@ def persist_snapshot_state(snapshot, symbol):
         phase = snapshot.options.get("dominant_phase")
         if phase:
             record_state(
-                layer="structure"
+                layer="structure",
                 state_key="dominant_phase",
                 state_value=str(phase),
                 symbol=None,  # structure is market-wide
