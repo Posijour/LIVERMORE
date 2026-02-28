@@ -291,6 +291,7 @@ def aggregate_options_snapshot(bybit_rows, okx_rows, deribit_rows) -> dict:
             "divergence": _mode(okx_rows, "divergence_type"),
             "divergence_diff": _avg(okx_rows, "divergence_diff"),
             "divergence_strength": _avg(okx_rows, "divergence_strength"),
+            "divergence_strength_label": _mode(okx_rows, "divergence_strength_label"),
         },
         "deribit": {
             "vbi_state": _mode(deribit_rows, "vbi_state"),
@@ -318,6 +319,19 @@ def render_options_snapshot(window: str, payload: dict) -> str:
         if phase in ("RICH", "HIGH"):
             return "RICH"
         return _fmt_text(phase)
+
+    def divergence_strength_label(value):
+        if not isinstance(value, (int, float)):
+            return "N/A"
+        if value < 0.2:
+            return "VERY_WEAK"
+        if value < 0.4:
+            return "WEAK"
+        if value < 0.6:
+            return "MODERATE"
+        if value < 0.8:
+            return "STRONG"
+        return "VERY_STRONG"
 
     iv_slope = deribit.get("iv_slope")
 
@@ -349,23 +363,28 @@ def render_options_snapshot(window: str, payload: dict) -> str:
         else "N/A"
     )
 
+    divergence_strength_value = okx.get("divergence_strength")
+    divergence_strength_text = _fmt_text(okx.get("divergence_strength_label"))
+    if divergence_strength_text == "N/A":
+        divergence_strength_text = divergence_strength_label(divergence_strength_value)
+
     return (
         f"=== OPTIONS SNAPSHOT ({window}) ===\n\n"
 
         "Behavior (Bybit):\n"
-        f"• Regime: {_fmt_text(bybit.get('regime'))}\n"
-        f"• Confidence: {_fmt_number(bybit.get('confidence'), 2)} ({confidence_label})\n"
         f"• MCI: {_fmt_number(bybit.get('mci'), 2)} "
-        f"({arrow(bybit.get('mci_slope'))})\n\n"
+        f"({arrow(bybit.get('mci_slope'))})\n"
+        f"• Regime: {_fmt_text(bybit.get('regime'))}\n"
+        f"• Confidence: {_fmt_number(bybit.get('confidence'), 2)} ({confidence_label})\n\n"
 
         "Liquidity (OKX):\n"
         f"• OLSI: {_fmt_number(okx.get('okx_olsi_avg'), 2)} "
         f"({arrow(okx.get('okx_olsi_slope'))})\n"
-        f"• Phase: {_fmt_text(okx.get('okx_liquidity_regime'))}\n\n"
+        f"• Regime: {_fmt_text(okx.get('okx_liquidity_regime'))}\n\n"
 
         "Mismatch (Bybit ↔ OKX):\n"
         f"• {_fmt_text(okx.get('divergence'))}\n"
-        f"• Strength: {_fmt_number(okx.get('divergence_strength'), 2)}\n\n"
+        f"• Strength: {_fmt_number(divergence_strength_value, 2)} ({divergence_strength_text})\n\n"
 
         "Volatility (Deribit):\n"
         f"• VBI: {_fmt_text(deribit.get('vbi_state'))}\n"
@@ -1113,6 +1132,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
