@@ -359,10 +359,9 @@ def render_options_snapshot(window: str, payload: dict) -> str:
         f"({arrow(bybit.get('mci_slope'))})\n\n"
 
         "Liquidity (OKX):\n"
-        f"• Liquidity: {liquidity_label(okx.get('okx_liquidity_regime'))}\n"
         f"• OLSI: {_fmt_number(okx.get('okx_olsi_avg'), 2)} "
         f"({arrow(okx.get('okx_olsi_slope'))})\n"
-        f"• Liquidity phase: {_fmt_text(okx.get('okx_liquidity_regime'))}\n\n"
+        f"• Phase: {_fmt_text(okx.get('okx_liquidity_regime'))}\n\n"
 
         "Mismatch (Bybit ↔ OKX):\n"
         f"• {_fmt_text(okx.get('divergence'))}\n"
@@ -1114,6 +1113,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
