@@ -55,7 +55,10 @@ def run_snapshot(ts_from, ts_to, symbol: Optional[str] = None):
         ts_from=ts_from,
         ts_to=ts_to,
         risk=aggregate_risk(risk_rows),
-        options=aggregate_options(load_okx_market_state(ts_from, ts_to)),
+        options=aggregate_options(
+            load_bybit_market_state(ts_from, ts_to),
+            load_okx_market_state(ts_from, ts_to),
+        ),
         deribit=aggregate_deribit(load_deribit(ts_from, ts_to, symbol=symbol)),
         meta=aggregate_meta(load_meta(ts_from, ts_to, symbol=symbol)),
     )
