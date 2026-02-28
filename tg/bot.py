@@ -6,7 +6,7 @@ from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
 from trend.event_anchored import event_anchored_analysis
 from time_utils import parse_window
-from data.queries import load_deribit, load_divergence, load_okx_market_state, load_bybit__market_state
+from data.queries import load_deribit, load_divergence, load_okx_market_state, load_bybit_market_state
 from main import persist_snapshot_state, run_snapshot
 from persistence.state_history import get_state_persistence_hours
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -274,18 +274,16 @@ def aggregate_options_snapshot(bybit_rows: list[dict], okx_rows: list[dict], der
             "mci": _avg(bybit_rows, "mci"),
             "mci_slope": _avg(bybit_rows, "mci_slope"),
             "mci_phase": _mode(bybit_rows, "mci_phase"),
-            "mci_phase_confidence": _avg(bybit_rows, "mci_phase_confidence"),
-            "mci_phase_prob_top1": _latest(bybit_rows, "mci_phase_prob_top1"),
-            "mci_phase_prob_top2": _latest(bybit_rows, "mci_phase_prob_top2"),
+            "confidence": _avg(bybit_rows, "confidence"),
         },
         "okx": {
             "okx_olsi": _avg(okx_rows, "okx_olsi"),
             "okx_olsi_avg": _avg(okx_rows, "okx_olsi_avg"),
             "okx_olsi_slope": _avg(okx_rows, "okx_olsi_slope"),
-            "liquidity_phase": _mode(okx_rows, "liquidity_phase"),
+            "okx_liquidity_regime": _mode(okx_rows, "okx_liquidity_regime"),
             "divergence": _mode(okx_rows, "divergence"),
             "divergence_diff": _avg(okx_rows, "divergence_diff"),
-            "divergence_strength_class": _mode(okx_rows, "divergence_strength_class"),
+            "divergence_strength": _avg(okx_rows, "divergence_strength"),
         },
         "deribit": {
             "vbi_state": _mode(deribit_rows, "vbi_state"),
@@ -328,19 +326,19 @@ def render_options_snapshot(window: str, payload: dict) -> str:
 
     confidence_label = (
         "LOW"
-        if isinstance(bybit.get("mci_phase_confidence"), (int, float))
-        and bybit.get("mci_phase_confidence") < 0.30
+        if isinstance(bybit.get("confidence"), (int, float))
+        and bybit.get("confidence") < 0.30
         else "WEAK"
-        if isinstance(bybit.get("mci_phase_confidence"), (int, float))
-        and bybit.get("mci_phase_confidence") < 0.50
+        if isinstance(bybit.get("confidence"), (int, float))
+        and bybit.get("confidence") < 0.50
         else "MODERATE"
-        if isinstance(bybit.get("mci_phase_confidence"), (int, float))
-        and bybit.get("mci_phase_confidence") < 0.70
+        if isinstance(bybit.get("confidence"), (int, float))
+        and bybit.get("confidence") < 0.70
         else "HIGH"
-        if isinstance(bybit.get("mci_phase_confidence"), (int, float))
-        and bybit.get("mci_phase_confidence") < 0.85
+        if isinstance(bybit.get("confidence"), (int, float))
+        and bybit.get("confidence") < 0.85
         else "VERY_HIGH"
-        if isinstance(bybit.get("mci_phase_confidence"), (int, float))
+        if isinstance(bybit.get("confidence"), (int, float))
         else "N/A"
     )
 
@@ -348,20 +346,20 @@ def render_options_snapshot(window: str, payload: dict) -> str:
         f"=== OPTIONS SNAPSHOT ({window}) ===\n\n"
 
         "Behavior (Bybit):\n"
-        f"• Regime: {_fmt_text(bybit.get('mci_phase'))}\n"
+        f"• Regime: {_fmt_text(bybit.get('regime'))}\n"
         f"• Confidence: {_fmt_number(bybit.get('mci_phase_confidence'), 2)} ({confidence_label})\n"
         f"• MCI: {_fmt_number(bybit.get('mci'), 2)} "
         f"({arrow(bybit.get('mci_slope'))})\n\n"
 
         "Liquidity (OKX):\n"
-        f"• Liquidity: {liquidity_label(okx.get('liquidity_phase'))}\n"
+        f"• Liquidity: {liquidity_label(okx.get('okx_liquidity_regime'))}\n"
         f"• OLSI: {_fmt_number(okx.get('okx_olsi'), 2)} "
         f"({arrow(okx.get('okx_olsi_slope'))})\n"
-        f"• Liquidity phase: {_fmt_text(okx.get('liquidity_phase'))}\n\n"
+        f"• Liquidity phase: {_fmt_text(okx.get('okx_liquidity_regime'))}\n\n"
 
         "Mismatch (Bybit ↔ OKX):\n"
         f"• {_fmt_text(okx.get('divergence'))}\n"
-        f"• Strength: {_fmt_text(okx.get('divergence_strength_class'))}\n\n"
+        f"• Strength: {_fmt_number(okx.get('divergence_strength'), 2)}\n\n"
 
         "Volatility (Deribit):\n"
         f"• VBI: {_fmt_text(deribit.get('vbi_state'))}\n"
@@ -598,7 +596,7 @@ async def options(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bybit_rows = await run_data_task(
         update,
         "options bybit",
-        load_bybit_market_state
+        load_bybit_market_state,
         ts_from,
         ts_to,
     )
@@ -1096,6 +1094,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
