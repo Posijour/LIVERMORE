@@ -125,6 +125,14 @@ async def lock_menu(query, text="⏳ Loading…"):
 
 # ---------------- HELPERS ----------------
 
+def _extract_iv_slope(deribit: dict) -> float:
+    for key in ("iv_slope", "iv_slope_avg"):
+        value = deribit.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return 0.0
+
+
 def snapshot_to_text(snapshot):
     r = snapshot.risk or {}
     o = snapshot.options or {}
@@ -137,7 +145,7 @@ def snapshot_to_text(snapshot):
         f"Struct: {o.get('dominant_phase_pct', 0):.1f}% "
         f"{o.get('dominant_phase')}\n"
         f"Vol: {v.get('vbi_state')} "
-        f"({v.get('iv_slope', 0):+.2f})\n"
+        f"({_extract_iv_slope(v):+.2f})\n"
         f"Div: {d.get('count', 0)} | "
         f"{d.get('share', 0)}% | "
         f"{d.get('dominant_type')}"
@@ -741,7 +749,7 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Struct: {o.get('dominant_phase')} "
             f"({o.get('dominant_phase_pct', 0)}%)\n"
             f"Vol: {v.get('vbi_state')} "
-            f"({v.get('iv_slope', 0):+.2f})\n\n"
+            f"({_extract_iv_slope(v):+.2f})\n\n"
         )
 
     text += fmt_market("BEFORE", snaps["before"])
@@ -804,7 +812,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Struct: {o.get('dominant_phase')} "
             f"({o.get('dominant_phase_pct', 0):.1f}%)\n"
             f"Vol: {v.get('vbi_state')} "
-            f"({v.get('iv_slope_avg', 0):+.2f})\n"
+            f"({_extract_iv_slope(v):+.2f})\n"
         )
 
     persistence_block = await run_data_task(update, "status persistence", build_persistence_block)
@@ -847,7 +855,10 @@ async def divergence_watcher(app):
     cycle_from, cycle_to = parse_window("1h")
 
     market_snapshot = await asyncio.to_thread(run_snapshot, cycle_from, cycle_to)
-    await asyncio.to_thread(persist_snapshot_state, market_snapshot, None)
+    try:
+        await asyncio.to_thread(persist_snapshot_state, market_snapshot, None)
+    except Exception as exc:
+        logger.warning("Snapshot persistence failed in watcher: %s", exc)
 
     ts_from, ts_to = parse_window("2h")
     rows = await asyncio.to_thread(load_divergence, ts_from, ts_to)
@@ -1093,6 +1104,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
