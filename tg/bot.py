@@ -1,14 +1,16 @@
 import asyncio
+import html
 import logging
 import time
 from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
 from time_utils import parse_window
-from data.queries import load_deribit, load_divergence, load_okx_market_state, load_bybit_market_state
+from data.queries import load_deribit, load_divergence, load_okx_market_state, load_bybit_market_state, load_risk
 from main import persist_snapshot_state, run_snapshot
 from persistence.state_history import get_state_persistence_hours
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
@@ -197,13 +199,13 @@ def _format_named_state_persistence(label: str, state: tuple[str, int] | None) -
     return f"{label}: {value} for {_format_hours(hours)}"
 
 
-def build_persistence_block() -> str:
+def build_market_persistence_block() -> str:
     avg_risk_state = get_state_persistence_hours("risk", "avg_risk", symbol=None)
     riskact_state = get_state_persistence_hours("risk", "risk_2plus_pct", symbol=None)
     struct_state = get_state_persistence_hours("structure", "dominant_phase", symbol=None)
     vol_state = get_state_persistence_hours("volatility", "vbi_state", symbol=None)
 
-    lines = ["Persistence:"]
+    lines = ["Market Persistence:"]
     lines.append(_format_risk_band_persistence("Risk", "avg_risk", avg_risk_state))
     lines.append(_format_risk_band_persistence("RiskAct", "risk_2plus_pct", riskact_state))
     lines.append(_format_named_state_persistence("Struct", struct_state))
@@ -273,6 +275,40 @@ def _latest(rows: list[dict], field: str):
         return None
     latest_row = max(rows, key=lambda r: r.get("ts", 0))
     return latest_row.get("data", {}).get(field)
+
+
+def _extract_status_price(rows: list[dict]) -> float | None:
+    price_fields = (
+        "price",
+        "last_price",
+        "mark_price",
+        "index_price",
+        "close",
+        "mid_price",
+    )
+
+    if not rows:
+        return None
+
+    latest_row = max(rows, key=lambda r: r.get("ts", 0))
+    data = latest_row.get("data", {})
+
+    for field in price_fields:
+        value = data.get(field)
+        if isinstance(value, (int, float)):
+            return float(value)
+
+    return None
+
+
+def _fmt_price(value: float | None) -> str:
+    if not isinstance(value, (int, float)):
+        return "N/A"
+
+    if abs(value) >= 1000:
+        return f"{value:,.0f}"
+
+    return f"{value:,.2f}"
 
 
 def _fmt_number(value, digits: int = 3, signed: bool = False) -> str:
@@ -418,6 +454,7 @@ async def safe_reply(
     update: Update,
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = None,
 ):
     target = None
     query = update.callback_query
@@ -437,29 +474,29 @@ async def safe_reply(
     if query and chunks:
         first_markup = markup if len(chunks) == 1 else None
         try:
-            await query.edit_message_text(chunks[0], reply_markup=first_markup)
+            await query.edit_message_text(chunks[0], reply_markup=first_markup, parse_mode=parse_mode)
         except BadRequest:
-            await target.reply_text(chunks[0], reply_markup=first_markup)
+            await target.reply_text(chunks[0], reply_markup=first_markup, parse_mode=parse_mode)
         except TimedOut:
             await asyncio.sleep(1)
-            await query.edit_message_text(chunks[0], reply_markup=first_markup)
+            await query.edit_message_text(chunks[0], reply_markup=first_markup, parse_mode=parse_mode)
 
         for idx, chunk in enumerate(chunks[1:], start=1):
             current_markup = markup if idx == len(chunks) - 1 else None
             try:
-                await target.reply_text(chunk, reply_markup=current_markup)
+                await target.reply_text(chunk, reply_markup=current_markup, parse_mode=parse_mode)
             except TimedOut:
                 await asyncio.sleep(1)
-                await target.reply_text(chunk, reply_markup=current_markup)
+                await target.reply_text(chunk, reply_markup=current_markup, parse_mode=parse_mode)
         return
 
     for idx, chunk in enumerate(chunks):
         current_markup = markup if idx == len(chunks) - 1 else None
         try:
-            await target.reply_text(chunk, reply_markup=current_markup)
+            await target.reply_text(chunk, reply_markup=current_markup, parse_mode=parse_mode)
         except TimedOut:
             await asyncio.sleep(1)
-            await target.reply_text(chunk, reply_markup=current_markup)
+            await target.reply_text(chunk, reply_markup=current_markup, parse_mode=parse_mode)
 
 
 async def run_data_task(update: Update, task_name: str, fn, *args, **kwargs):
@@ -619,7 +656,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"[{label}]\n"
         text += snapshot_to_text(snap) + "\n\n"
 
-    persistence_block = await run_data_task(update, "state persistence", build_persistence_block)
+    persistence_block = await run_data_task(update, "state persistence", build_market_persistence_block)
     if persistence_block is not None:
         text += persistence_block + "\n\n"
 
@@ -825,16 +862,25 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if market_snapshots is None:
         return
 
-    text = f"=== STATUS: {symbol} ===\n\n"
+    ts_from, ts_to = parse_window("1h")
+    risk_rows = await run_data_task(update, "status price", load_risk, ts_from, ts_to, symbol)
+    if risk_rows is None:
+        return
+
+    price_value = _extract_status_price(risk_rows)
+    symbol_html = html.escape(symbol)
+
+    text = f"=== STATUS: {symbol_html} ===\n\n"
+    text += f"Price: {_fmt_price(price_value)}\n\n"
 
     # ---------- TICKER (FUTURES) ----------
-    text += "Perps\n"
+    text += "<u>Perps</u>\n"
 
     for w, snap in ticker_snapshots:
         r = snap.risk or {}
         d = getattr(snap, "divergence", {}) or {}
 
-        text += f"[{w}]\n"
+        text += f"<b>[{html.escape(w)}]</b>\n"
         text += (
             f"Risk: {r.get('avg_risk', 0):.2f} | "
             f"RiskAct: {r.get('risk_2plus_pct', 0):.1f}% | "
@@ -842,25 +888,27 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     # ---------- MARKET CONTEXT (BTC / ETH) ----------
-    text += "\nOptions (BTC / ETH)\n"
+    text += "\n<u>Options (BTC / ETH)</u>\n"
 
     for w, snap in market_snapshots:
         o = snap.options or {}
         v = snap.deribit or {}
 
-        text += f"[{w}]\n"
+        text += f"<b>[{html.escape(w)}]</b>\n"
         text += (
-            f"Struct: {o.get('dominant_phase')} "
+            f"Struct: {html.escape(str(o.get('dominant_phase')))} "
             f"({o.get('dominant_phase_pct', 0):.1f}%)\n"
-            f"Vol: {v.get('vbi_state')} "
+            f"Vol: {html.escape(str(v.get('vbi_state')))} "
             f"({_extract_iv_slope(v):+.2f})\n"
         )
 
-    persistence_block = await run_data_task(update, "status persistence", build_persistence_block)
+    persistence_block = await run_data_task(update, "status persistence", build_market_persistence_block)
     if persistence_block is not None:
+        persistence_block = html.escape(persistence_block)
+        persistence_block = persistence_block.replace("Market Persistence:", "<u>Market Persistence</u>:")
         text += "\n" + persistence_block
 
-    await safe_reply(update, text, reply_markup=section_nav_keyboard(context))
+    await safe_reply(update, text, reply_markup=section_nav_keyboard(context), parse_mode=ParseMode.HTML)
 
 
 async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1154,6 +1202,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
