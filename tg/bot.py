@@ -862,16 +862,23 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if market_snapshots is None:
         return
 
-    ts_from, ts_to = parse_window("1h")
-    risk_rows = await run_data_task(update, "status price", load_risk, ts_from, ts_to, symbol)
+    ts_from, ts_to = parse_window("10m")
+    risk_rows = await run_data_task(update, "status price (10m)", load_risk, ts_from, ts_to, symbol)
     if risk_rows is None:
         return
+
+    if not risk_rows:
+        ts_from, ts_to = parse_window("30m")
+        risk_rows = await run_data_task(update, "status price (1h fallback)", load_risk, ts_from, ts_to, symbol)
+        if risk_rows is None:
+            return
 
     price_value = _extract_status_price(risk_rows)
     symbol_html = html.escape(symbol)
 
     text = f"=== STATUS: {symbol_html} ===\n\n"
     text += f"Price: {_fmt_price(price_value)}\n\n"
+
 
     # ---------- TICKER (FUTURES) ----------
     text += "<u>Perps</u>\n"
@@ -1202,6 +1209,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
