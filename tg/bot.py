@@ -910,7 +910,7 @@ async def divergence_watcher(app):
 
         # ❗️ ВСТАВЬ СВОЙ CHAT_ID
         await app.bot.send_message(
-            chat_id=766363011,
+            chat_id=-1003829481191,
             text=text
         )
 
@@ -1132,6 +1132,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
