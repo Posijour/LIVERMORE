@@ -244,6 +244,22 @@ def _avg(rows: list[dict], field: str) -> float | None:
     return sum(numeric) / len(numeric)
 
 
+def _min(rows: list[dict], field: str) -> float | None:
+    values = [r.get("data", {}).get(field) for r in rows]
+    numeric = [float(v) for v in values if isinstance(v, (int, float))]
+    if not numeric:
+        return None
+    return min(numeric)
+
+
+def _max(rows: list[dict], field: str) -> float | None:
+    values = [r.get("data", {}).get(field) for r in rows]
+    numeric = [float(v) for v in values if isinstance(v, (int, float))]
+    if not numeric:
+        return None
+    return max(numeric)
+
+
 def _mode(rows: list[dict], field: str):
     values = [r.get("data", {}).get(field) for r in rows]
     values = [v for v in values if v not in (None, "")]
@@ -285,10 +301,14 @@ def aggregate_options_snapshot(bybit_rows, okx_rows, deribit_rows) -> dict:
             "confidence": _latest(bybit_rows, "confidence"),
         },
         "okx": {
+            "okx_olsi_latest": _latest(okx_rows, "okx_olsi_avg"),
             "okx_olsi_avg": _avg(okx_rows, "okx_olsi_avg"),
+            "okx_olsi_min": _min(okx_rows, "okx_olsi_avg"),
+            "okx_olsi_max": _max(okx_rows, "okx_olsi_avg"),
             "okx_olsi_slope": _latest(okx_rows, "okx_olsi_slope"),
             "okx_liquidity_regime": _mode(okx_rows, "okx_liquidity_regime"),
             "divergence": _mode(okx_rows, "divergence_type"),
+
             "divergence_diff": _avg(okx_rows, "divergence_diff"),
             "divergence_strength": _avg(okx_rows, "divergence_strength"),
             "divergence_strength_label": _mode(okx_rows, "divergence_strength_label"),
@@ -378,8 +398,10 @@ def render_options_snapshot(window: str, payload: dict) -> str:
         f"• Confidence: {_fmt_number(bybit.get('confidence'), 2)} ({confidence_label})\n\n"
 
         "Liquidity (OKX):\n"
-        f"• OLSI: {_fmt_number(okx.get('okx_olsi_avg'), 2)} "
+        f"• OLSI: {_fmt_number(okx.get('okx_olsi_latest'), 3)} "
         f"({arrow(okx.get('okx_olsi_slope'))})\n"
+        f"• Avg/Range: {_fmt_number(okx.get('okx_olsi_avg'), 3)} "
+        f"[{_fmt_number(okx.get('okx_olsi_min'), 3)} .. {_fmt_number(okx.get('okx_olsi_max'), 3)}]\n"
         f"• Regime: {_fmt_text(okx.get('okx_liquidity_regime'))}\n\n"
 
         "Dislocation (Bybit ↔ OKX):\n"
@@ -1132,6 +1154,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
