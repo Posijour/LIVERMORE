@@ -1,6 +1,7 @@
 import asyncio
 import html
 import logging
+from datetime import datetime, timezone
 import time
 from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
@@ -761,6 +762,18 @@ def can_send_alert(symbol, div_type, event_ts):
     """
     key = (symbol, div_type)
 
+    if isinstance(event_ts, str):
+        if event_ts.isdigit():
+            event_ts = int(event_ts)
+        else:
+            try:
+                dt = datetime.fromisoformat(event_ts.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                event_ts = int(dt.timestamp() * 1000)
+            except ValueError:
+                return False
+
     last_event_ts = _LAST_ALERTS.get(key)
     if last_event_ts and event_ts <= last_event_ts:
         return False
@@ -986,10 +999,13 @@ async def divergence_watcher(app):
         )
 
         # ❗️ ВСТАВЬ СВОЙ CHAT_ID
-        await app.bot.send_message(
-            chat_id=-1003829481191,
-            text=text
-        )
+        try:
+            await app.bot.send_message(
+                chat_id=-1003829481191,
+                text=text
+            )
+        except BadRequest as exc:
+            logger.error("Watcher failed to deliver alert to chat %s: %s", -1003829481191, exc)
 
 
 async def divergence_watcher_job(context: ContextTypes.DEFAULT_TYPE):
@@ -1209,24 +1225,3 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
