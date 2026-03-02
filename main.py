@@ -135,7 +135,6 @@ def persist_snapshot_state(snapshot, symbol):
                 layer="volatility",
                 state_key="vbi_state",
                 state_value=str(vbi),
-                ts=ts,
                 symbol=None,  # vol is market-wide
             )
 
