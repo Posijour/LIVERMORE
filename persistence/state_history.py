@@ -1,5 +1,8 @@
 from datetime import datetime, timezone
 from json import dumps, loads
+import socket
+import time
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -8,6 +11,8 @@ from config import SUPABASE_KEY, SUPABASE_URL
 
 PAGE_SIZE = 200
 REQUEST_TIMEOUT_SECONDS = 10
+MAX_RETRIES = 3
+RETRY_BACKOFF_SECONDS = 1.5
 
 
 def _build_request(url: str, method: str = "GET", payload: dict | None = None) -> Request:
@@ -68,8 +73,21 @@ def _fetch_state_rows(
     url = f"{SUPABASE_URL}/rest/v1/state_history?{query}"
 
     req = _build_request(url)
-    with urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-        return loads(response.read().decode("utf-8"))
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            with urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                return loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+            raise RuntimeError(f"state_history HTTP error {exc.code}: {detail}") from exc
+        except (TimeoutError, socket.timeout, URLError) as exc:
+            if attempt == MAX_RETRIES:
+                reason = getattr(exc, "reason", exc)
+                raise RuntimeError(f"state_history connection error: {reason}") from exc
+            time.sleep(RETRY_BACKOFF_SECONDS * attempt)
+
+    raise RuntimeError("state_history connection error: exhausted retries")
 
 
 def _fetch_last_state(layer: str, state_key: str, symbol: str | None) -> str | None:
@@ -166,5 +184,17 @@ def record_state(
     url = f"{SUPABASE_URL}/rest/v1/state_history"
     req = _build_request(url, method="POST", payload=payload)
 
-    with urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS):
-        return
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            with urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS):
+                return
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+            raise RuntimeError(f"state_history HTTP error {exc.code}: {detail}") from exc
+        except (TimeoutError, socket.timeout, URLError) as exc:
+            if attempt == MAX_RETRIES:
+                reason = getattr(exc, "reason", exc)
+                raise RuntimeError(f"state_history connection error: {reason}") from exc
+            time.sleep(RETRY_BACKOFF_SECONDS * attempt)
+
+    raise RuntimeError("state_history connection error: exhausted retries")
