@@ -29,6 +29,11 @@ MAX_TELEGRAM_TEXT_LEN = 4000
 _LAST_ALERTS = {}  # (symbol, div_type) -> event_ts
 ALERT_COOLDOWN = 30 * 60  # 30 минут
 _PERSISTENCE_WARNING_EMITTED = False
+_PERSISTENCE_CACHE_TTL_SECONDS = 45
+_PERSISTENCE_CACHE = {
+    "value": None,
+    "at": 0.0,
+}
 
 
 # ---------------- CONFIG ----------------
@@ -212,6 +217,27 @@ def build_market_persistence_block() -> str:
     lines.append(_format_named_state_persistence("Struct", struct_state))
     lines.append(_format_named_state_persistence("Vol", vol_state))
     return "\n".join(lines)
+
+
+def build_market_persistence_block_cached() -> str:
+    now = time.monotonic()
+    cached_at = _PERSISTENCE_CACHE["at"]
+    cached_value = _PERSISTENCE_CACHE["value"]
+
+    if cached_value and (now - cached_at) < _PERSISTENCE_CACHE_TTL_SECONDS:
+        return cached_value
+
+    fresh_value = build_market_persistence_block()
+    _PERSISTENCE_CACHE["value"] = fresh_value
+    _PERSISTENCE_CACHE["at"] = now
+    return fresh_value
+
+
+def parse_window_safe(window: str) -> tuple[int, int] | None:
+    try:
+        return parse_window(window)
+    except ValueError:
+        return None
 
 def split_text_chunks(text: str, chunk_size: int = MAX_TELEGRAM_TEXT_LEN):
     lines = text.splitlines(keepends=True)
@@ -513,7 +539,13 @@ async def run_data_task(update: Update, task_name: str, fn, *args, **kwargs):
 
 
 async def collect_snapshots(update: Update, task_name: str, windows: list[str], symbol: str | None = None):
-    ranges = [(w, *parse_window(w)) for w in windows]
+    ranges = []
+    for w in windows:
+        bounds = parse_window_safe(w)
+        if bounds is None:
+            await safe_reply(update, f"Invalid window: {w}. Use values like 10m, 1h, 6h, 1d.")
+            return None
+        ranges.append((w, *bounds))
 
     try:
         snaps = await asyncio.gather(
@@ -631,7 +663,11 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # -------- SINGLE WINDOW --------
     if len(args) == 1:
         window = args[0]
-        ts_from, ts_to = parse_window(window)
+        bounds = parse_window_safe(window)
+        if bounds is None:
+            await safe_reply(update, "Invalid window. Use values like 10m, 1h, 6h, 1d.")
+            return
+        ts_from, ts_to = bounds
         snap = await run_data_task(update, "stats snapshot", run_snapshot, ts_from, ts_to)
         if snap is None:
             return
@@ -657,7 +693,15 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"[{label}]\n"
         text += snapshot_to_text(snap) + "\n\n"
 
-    persistence_block = await run_data_task(update, "state persistence", build_market_persistence_block)
+    evolution = analyze_state_evolution(snapshots)
+    changes = evolution.get("changes", {})
+    if changes:
+        text += "State changes (old → new):\n"
+        for metric, value in changes.items():
+            text += f"• {metric}: {value}\n"
+        text += f"\nConclusion: {evolution.get('conclusion')}\n\n"
+
+    persistence_block = await run_data_task(update, "state persistence", build_market_persistence_block_cached)
     if persistence_block is not None:
         text += persistence_block + "\n\n"
 
@@ -676,7 +720,11 @@ async def options(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_reply(update, "Usage: /options [1h|6h|12h]")
         return
 
-    ts_from, ts_to = parse_window(window)
+    bounds = parse_window_safe(window)
+    if bounds is None:
+        await safe_reply(update, "Usage: /options [1h|6h|12h]")
+        return
+    ts_from, ts_to = bounds
 
     bybit_rows = await run_data_task(
         update,
@@ -716,7 +764,7 @@ async def options(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_action(context, "alerts")
     # -------- ACTIVE STATES (1h) --------
-    ts_from, ts_to = parse_window("1h")
+    ts_from, ts_to = parse_window_safe("1h")
     snap = await run_data_task(update, "alerts snapshot", run_snapshot, ts_from, ts_to)
     if snap is None:
         return
@@ -730,7 +778,7 @@ async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "• none\n"
 
     # -------- RECENT DIVERGENCES (2h) --------
-    ts_from, ts_to = parse_window("2h")
+    ts_from, ts_to = parse_window_safe("2h")
     div_rows = await run_data_task(update, "alerts divergence", load_divergence, ts_from, ts_to)
     if div_rows is None:
         return
@@ -774,8 +822,18 @@ def can_send_alert(symbol, div_type, event_ts):
             except ValueError:
                 return False
 
+    if isinstance(event_ts, (int, float)):
+        event_ts = int(event_ts)
+        if event_ts < 10_000_000_000:
+            event_ts *= 1000
+    else:
+        return False
+
     last_event_ts = _LAST_ALERTS.get(key)
     if last_event_ts and event_ts <= last_event_ts:
+        return False
+
+    if last_event_ts and (event_ts - last_event_ts) < ALERT_COOLDOWN * 1000:
         return False
 
     _LAST_ALERTS[key] = event_ts
@@ -785,7 +843,7 @@ async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from trend.event_anchored import event_anchored_analysis
     remember_last_action(context, "event")
     # 1. Берём последнюю дивергенцию
-    ts_from, ts_to = parse_window("4h")
+    ts_from, ts_to = parse_window_safe("4h")
     rows = await run_data_task(update, "event divergence", load_divergence, ts_from, ts_to)
     if rows is None:
         return
@@ -875,13 +933,13 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if market_snapshots is None:
         return
 
-    ts_from, ts_to = parse_window("10m")
+    ts_from, ts_to = parse_window_safe("10m")
     risk_rows = await run_data_task(update, "status price (10m)", load_risk, ts_from, ts_to, symbol)
     if risk_rows is None:
         return
 
     if not risk_rows:
-        ts_from, ts_to = parse_window("30m")
+        ts_from, ts_to = parse_window_safe("30m")
         risk_rows = await run_data_task(update, "status price (1h fallback)", load_risk, ts_from, ts_to, symbol)
         if risk_rows is None:
             return
@@ -922,7 +980,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"({_extract_iv_slope(v):+.2f})\n"
         )
 
-    persistence_block = await run_data_task(update, "status persistence", build_market_persistence_block)
+    persistence_block = await run_data_task(update, "status persistence", build_market_persistence_block_cached)
     if persistence_block is not None:
         persistence_block = html.escape(persistence_block)
         persistence_block = persistence_block.replace("Market Persistence:", "<u>Market Persistence</u>:")
@@ -960,9 +1018,8 @@ logger = logging.getLogger(__name__)
 async def divergence_watcher(app):
     global _PERSISTENCE_WARNING_EMITTED
     from data.queries import load_divergence
-    from time_utils import parse_window
 
-    cycle_from, cycle_to = parse_window("1h")
+    cycle_from, cycle_to = parse_window_safe("1h")
 
     market_snapshot = await asyncio.to_thread(run_snapshot, cycle_from, cycle_to)
     try:
@@ -978,7 +1035,7 @@ async def divergence_watcher(app):
         else:
             logger.warning("Snapshot persistence failed in watcher: %s", exc)
 
-    ts_from, ts_to = parse_window("2h")
+    ts_from, ts_to = parse_window_safe("2h")
     rows = await asyncio.to_thread(load_divergence, ts_from, ts_to)
 
     for r in rows:
@@ -1225,3 +1282,4 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
