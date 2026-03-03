@@ -8,8 +8,15 @@ def parse_window(arg: str) -> tuple[int, int]:
     """
     '6h', '90m', '1d'
     """
-    n = int(arg[:-1])
-    unit = arg[-1]
+    if not isinstance(arg, str) or len(arg) < 2:
+        raise ValueError("Invalid window format")
+
+    raw = arg.strip().lower()
+    if not raw[:-1].isdigit():
+        raise ValueError("Invalid window format")
+
+    n = int(raw[:-1])
+    unit = raw[-1]
 
     mult = {
         "m": 60 * 1000,
@@ -18,6 +25,8 @@ def parse_window(arg: str) -> tuple[int, int]:
     }
 
     if unit not in mult:
+        raise ValueError("Invalid window format")
+    if n <= 0:
         raise ValueError("Invalid window format")
 
     ts_to = now_ms()
