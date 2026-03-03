@@ -7,14 +7,12 @@ from aggregation.meta import aggregate_meta
 from aggregation.options import aggregate_options
 from aggregation.risk import aggregate_risk
 from config import DEFAULT_WINDOW_HOURS
-from data.queries import load_deribit, load_meta, load_bybit_market_state, load_okx_market_state, load_risk
+from data.queries import load_deribit, load_meta, load_okx_market_state, load_risk
 from interpretation.engine import interpret
 from interpretation.states import detect_states
 from models.snapshot import MarketSnapshot
-from time_utils import parse_datetime, parse_window
-from trend.analyzer import analyze_direction
+from time_utils import parse_window
 from data.queries import load_divergence
-from persistence.state_history import record_state
 
 
 def aggregate_divergence(rows, risk_rows):
