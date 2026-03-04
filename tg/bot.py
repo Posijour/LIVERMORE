@@ -1026,6 +1026,18 @@ async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"Driver: {_fmt_text(ms.get('driver'))}\n"
         text += f"Regime: {_fmt_text(ms.get('regime'))}"
 
+    # DEBUG (temporary)
+    dd = ms.get("debug_disp") or {}
+    dv = ms.get("debug_vbi") or {}
+    dm = ms.get("debug_mci") or {}
+    dn = ms.get("debug_driver_norms") or {}
+    
+    text += "\n\n[debug]\n"
+    text += f"disp: now={dd.get('disp_now')} lo={dd.get('lo')} hi={dd.get('hi')} norm={dd.get('norm')}\n"
+    text += f"vbi:  abs={dv.get('iv_abs')} lo={dv.get('lo')} hi={dv.get('hi')} norm={dv.get('norm')}\n"
+    text += f"mci:  val={dm.get('mci')} lo={dm.get('lo')} hi={dm.get('hi')} norm={dm.get('norm')}\n"
+    text += f"drv:  {dn}\n"
+
     await safe_reply(update, text, reply_markup=section_nav_keyboard(context))
 
 
@@ -1299,5 +1311,6 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
