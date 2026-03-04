@@ -339,9 +339,6 @@ def compute_market_structure(
     disp_hi = max(disp_samples) if disp_samples else None
 
     disp_norm = _norm01(dispersion_xs_now, disp_lo, disp_hi)
-    if disp_norm is None and _is_num(dispersion_xs_now):
-        # If we have a live value but no valid range, keep a neutral stance.
-        disp_norm = 0.5
     coherence = None if disp_norm is None else (1.0 - disp_norm)
 
     if coherence is None:
@@ -364,8 +361,6 @@ def compute_market_structure(
     iv_lo = min(iv_abs_12h) if iv_abs_12h else None
     iv_hi = max(iv_abs_12h) if iv_abs_12h else None
     iv_norm = _norm01(iv_slope_abs_now, iv_lo, iv_hi)
-    if iv_norm is None and _is_num(iv_slope_abs_now):
-        iv_norm = 0.5
     vbi_comp = None if iv_norm is None else (1.0 - iv_norm)
 
     # MCI component: prefer low MCI (compression) OR low abs(mci_slope)
@@ -379,8 +374,6 @@ def compute_market_structure(
     mci_hi = max(mci_12h) if mci_12h else None
 
     mci_norm = _norm01(mci_now, mci_lo, mci_hi)
-    if mci_norm is None and _is_num(mci_now):
-        mci_norm = 0.5
     mci_comp = None if mci_norm is None else (1.0 - mci_norm)
 
     # dispersion component uses same dispersion_xs normalization (low dispersion => more compression)
@@ -442,7 +435,7 @@ def compute_market_structure(
     mci_slope_1h = [v for v in mci_slope_1h if _is_num(v)]
     opt_impulse = (sum(mci_slope_1h) / len(mci_slope_1h)) if mci_slope_1h else None
 
-        # Vol impulse: delta of iv_slope over 1h (latest - earliest)
+    # Vol impulse: delta of iv_slope over 1h (latest - earliest)
     iv_series = [_extract_iv_slope(r) for r in (deribit_rows_1h or [])]
     iv_series = [v for v in iv_series if _is_num(v)]
     vol_impulse = None
@@ -476,50 +469,35 @@ def compute_market_structure(
     opt_norm = _norm01(opt_impulse_abs, opt_lo, opt_hi)
     vol_norm = _norm01(vol_impulse_abs, vol_lo, vol_hi)
 
-    norm_impulses = {"FUTURES": fut_norm, "OPTIONS": opt_norm, "VOL": vol_norm}
+    norm_impulses = {
+        "FUTURES": fut_norm,
+        "OPTIONS": opt_norm,
+        "VOL": vol_norm,
+    }
+
     available = [(k, v) for k, v in norm_impulses.items() if v is not None]
-    
+
     if len(available) < 2:
-        driver = "N/A"          # честно: сравнивать нечего
+        driver = "N/A"
         driver_conf = 0.0
     else:
         available.sort(key=lambda kv: kv[1], reverse=True)
-        top_k, top_v = available[0]
-    
-        noise_floor = 0.15
-        if top_v < noise_floor:
-            driver = "NONE"     # честно: нет доминирования сейчас
-            driver_conf = 0.0
-        else:
-            second_v = available[1][1]
-            if second_v > 0 and (top_v - second_v) / top_v <= 0.15:
-                driver = "ALIGNED"
-                driver_conf = 0.65
-            else:
-                driver = f"{top_k}_LEAD"
-                sep = top_v - second_v
-                driver_conf = 0.60 + 0.30 * _clamp01(sep)
 
-        # ✅ normalized space noise floor: treat < 0.20 as noise (tunable)
-        noise_floor = 0.20
+        top_k, top_v = available[0]
+        second_v = available[1][1]
+
+        noise_floor = 0.12
+
         if top_v < noise_floor:
             driver = "NONE"
             driver_conf = 0.0
-        elif len(sorted_imp) >= 2:
-            second_v = sorted_imp[1][1]
-            # ✅ ALIGNED if within 15% of top in normalized space
-            if second_v > 0 and (top_v - second_v) / top_v <= 0.15:
-                driver = "ALIGNED"
-                driver_conf = 0.65
-            else:
-                driver = f"{top_k}_LEAD"
-                # confidence grows with separation
-                sep = (top_v - second_v) if second_v is not None else top_v
-                driver_conf = 0.60 + 0.30 * max(0.0, min(1.0, sep))
+        elif (top_v - second_v) / top_v <= 0.15:
+            driver = "ALIGNED"
+            driver_conf = 0.65
         else:
             driver = f"{top_k}_LEAD"
-            driver_conf = 0.60 + 0.30 * max(0.0, min(1.0, top_v))
-
+            sep = top_v - second_v
+            driver_conf = 0.60 + 0.30 * _clamp01(sep)
 
     # --- Diagnostic regime tag ---
     if compression_label == "EXTREME" and driver in ("OPTIONS_LEAD", "VOL_LEAD"):
@@ -551,8 +529,3 @@ def compute_market_structure(
 
         "regime": regime,
     }
-
-
-
-
-
