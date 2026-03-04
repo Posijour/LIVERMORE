@@ -217,6 +217,9 @@ def compute_market_structure(
     disp_hi = max(disp_samples) if disp_samples else None
 
     disp_norm = _norm01(dispersion_xs_now, disp_lo, disp_hi)
+    if disp_norm is None and _is_num(dispersion_xs_now):
+        # If we have a live value but no valid range, keep a neutral stance.
+        disp_norm = 0.5
     coherence = None if disp_norm is None else (1.0 - disp_norm)
 
     if coherence is None:
@@ -239,6 +242,8 @@ def compute_market_structure(
     iv_lo = min(iv_abs_12h) if iv_abs_12h else None
     iv_hi = max(iv_abs_12h) if iv_abs_12h else None
     iv_norm = _norm01(iv_slope_abs_now, iv_lo, iv_hi)
+    if iv_norm is None and _is_num(iv_slope_abs_now):
+        iv_norm = 0.5
     vbi_comp = None if iv_norm is None else (1.0 - iv_norm)
 
     # MCI component: prefer low MCI (compression) OR low abs(mci_slope)
@@ -252,16 +257,27 @@ def compute_market_structure(
     mci_hi = max(mci_12h) if mci_12h else None
 
     mci_norm = _norm01(mci_now, mci_lo, mci_hi)
+    if mci_norm is None and _is_num(mci_now):
+        mci_norm = 0.5
     mci_comp = None if mci_norm is None else (1.0 - mci_norm)
 
     # dispersion component uses same dispersion_xs normalization (low dispersion => more compression)
     disp_comp = None if disp_norm is None else (1.0 - disp_norm)
 
-    if vbi_comp is None or mci_comp is None or disp_comp is None:
+    compression_components = [
+        (vbi_comp, 0.4),
+        (mci_comp, 0.4),
+        (disp_comp, 0.2),
+    ]
+    available_components = [(value, weight) for value, weight in compression_components if value is not None]
+
+    if not available_components:
         compression_score = None
         compression_label = "N/A"
     else:
-        compression_score = 100.0 * (0.4 * vbi_comp + 0.4 * mci_comp + 0.2 * disp_comp)
+        weight_sum = sum(weight for _, weight in available_components)
+        weighted_score = sum(value * weight for value, weight in available_components) / weight_sum
+        compression_score = 100.0 * weighted_score
         if compression_score >= 75:
             compression_label = "EXTREME"
         elif compression_score >= 60:
@@ -377,4 +393,3 @@ def compute_market_structure(
 
         "regime": regime,
     }
-
