@@ -37,14 +37,8 @@ def _clamp01(x: Optional[float]) -> Optional[float]:
     return max(0.0, min(1.0, float(x)))
 
 def _norm01(x: Optional[float], lo: Optional[float], hi: Optional[float]) -> Optional[float]:
-    if x is None or lo is None or hi is None:
-        return None
-    # Degenerate ranges are common on low-vol datasets (e.g., 1-2 hourly points
-    # or fully flat baselines). Return a neutral score instead of N/A so higher
-    # level labels/regimes still remain informative.
-    if hi == lo:
-        return 0.5
-    if hi < lo:
+    # честно: если диапазона нет — нет нормализации
+    if x is None or lo is None or hi is None or hi <= lo:
         return None
     return _clamp01((x - lo) / (hi - lo))
 
@@ -482,43 +476,29 @@ def compute_market_structure(
     opt_norm = _norm01(opt_impulse_abs, opt_lo, opt_hi)
     vol_norm = _norm01(vol_impulse_abs, vol_lo, vol_hi)
 
-    # ✅ fallback: if we cannot normalize (no range), use raw abs impulses with soft scaling
-    if fut_norm is None and _is_num(fut_impulse_abs):
-        fut_norm = _clamp01(fut_impulse_abs / 1.5)  # 1.5 risk points / hour ~ "large"
-    if opt_norm is None and _is_num(opt_impulse_abs):
-        opt_norm = _clamp01(opt_impulse_abs / 0.10)  # mci_slope ~ 0.10 is large
-    if vol_norm is None and _is_num(vol_impulse_abs):
-        vol_norm = _clamp01(vol_impulse_abs / 0.10)  # iv_slope delta ~ 0.10 is large
-
     norm_impulses = {"FUTURES": fut_norm, "OPTIONS": opt_norm, "VOL": vol_norm}
-
-    sorted_imp = sorted(
-        [(k, v) for k, v in norm_impulses.items() if v is not None],
-        key=lambda kv: kv[1],
-        reverse=True,
-    )
-
-    if not sorted_imp:
-        driver = "NONE"
+    available = [(k, v) for k, v in norm_impulses.items() if v is not None]
+    
+    if len(available) < 2:
+        driver = "N/A"          # честно: сравнивать нечего
         driver_conf = 0.0
     else:
-        top_k, top_v = sorted_imp[0]
-        noise_floor = 0.15  # slightly softer than 0.20
+        available.sort(key=lambda kv: kv[1], reverse=True)
+        top_k, top_v = available[0]
+    
+        noise_floor = 0.15
         if top_v < noise_floor:
-            driver = "NONE"
+            driver = "NONE"     # честно: нет доминирования сейчас
             driver_conf = 0.0
-        elif len(sorted_imp) >= 2:
-            second_v = sorted_imp[1][1]
+        else:
+            second_v = available[1][1]
             if second_v > 0 and (top_v - second_v) / top_v <= 0.15:
                 driver = "ALIGNED"
                 driver_conf = 0.65
             else:
                 driver = f"{top_k}_LEAD"
-                sep = (top_v - second_v) if second_v is not None else top_v
+                sep = top_v - second_v
                 driver_conf = 0.60 + 0.30 * _clamp01(sep)
-        else:
-            driver = f"{top_k}_LEAD"
-            driver_conf = 0.60 + 0.30 * _clamp01(top_v)
 
         # ✅ normalized space noise floor: treat < 0.20 as noise (tunable)
         noise_floor = 0.20
@@ -571,6 +551,7 @@ def compute_market_structure(
 
         "regime": regime,
     }
+
 
 
 
