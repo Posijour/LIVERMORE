@@ -26,7 +26,14 @@ def _clamp01(x: Optional[float]) -> Optional[float]:
     return max(0.0, min(1.0, float(x)))
 
 def _norm01(x: Optional[float], lo: Optional[float], hi: Optional[float]) -> Optional[float]:
-    if x is None or lo is None or hi is None or hi <= lo:
+    if x is None or lo is None or hi is None:
+        return None
+    # Degenerate ranges are common on low-vol datasets (e.g., 1-2 hourly points
+    # or fully flat baselines). Return a neutral score instead of N/A so higher
+    # level labels/regimes still remain informative.
+    if hi == lo:
+        return 0.5
+    if hi < lo:
         return None
     return _clamp01((x - lo) / (hi - lo))
 
@@ -42,9 +49,16 @@ def _fmt_float(x: Optional[float], digits: int = 2) -> str:
 # ----------------- data extraction -----------------
 
 def _bucket_hour(ts: int) -> int:
-    # ts comes in milliseconds from parse_window/client fetch
+    # ts should be in milliseconds
     hour_ms = 3600 * 1000
     return ts - (ts % hour_ms)
+
+
+def _ts_to_ms(ts: Optional[float]) -> Optional[int]:
+    if not isinstance(ts, (int, float)):
+        return None
+    value = int(ts)
+    return value * 1000 if value < 10_000_000_000 else value
 
 
 def _normalize_symbol(symbol: Optional[str]) -> Optional[str]:
@@ -98,13 +112,12 @@ def _latest_per_symbol(rows: List[dict], value_fn) -> Dict[str, float]:
         sym = _normalize_symbol(_extract_symbol(r))
         if not sym:
             continue
-        ts = r.get("ts")
-        if not isinstance(ts, (int, float)):
+        ts = _ts_to_ms(r.get("ts"))
+        if ts is None:
             continue
         val = value_fn(r)
         if val is None:
             continue
-        ts = int(ts)
         prev = best.get(sym)
         if prev is None or ts > prev[0]:
             best[sym] = (ts, float(val))
@@ -129,10 +142,9 @@ def _hourly_dispersion_from_risk_rows(
         sym = _normalize_symbol(_extract_symbol(r))
         if sym not in supported_norm:
             continue
-        ts = r.get("ts")
-        if not isinstance(ts, (int, float)):
+        ts = _ts_to_ms(r.get("ts"))
+        if ts is None:
             continue
-        ts = int(ts)
         v = _extract_risk_value(r)
         if v is None:
             continue
@@ -269,10 +281,9 @@ def compute_market_structure(
         sym = _normalize_symbol(_extract_symbol(r))
         if sym not in supported_norm:
             continue
-        ts = r.get("ts")
-        if not isinstance(ts, (int, float)):
+        ts = _ts_to_ms(r.get("ts"))
+        if ts is None:
             continue
-        ts = int(ts)
         v = _extract_risk_value(r)
         if v is None:
             continue
@@ -366,3 +377,4 @@ def compute_market_structure(
 
         "regime": regime,
     }
+
