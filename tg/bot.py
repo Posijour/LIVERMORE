@@ -6,6 +6,7 @@ import time
 from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
+from trend.market_structure import compute_market_structure
 from time_utils import parse_window
 from data.queries import load_deribit, load_divergence, load_okx_market_state, load_bybit_market_state, load_risk
 from main import persist_snapshot_state, run_snapshot
@@ -1009,6 +1010,22 @@ async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += f"12h ↔ 1h: {data['volatility']['12h_1h']}\n"
     text += f"6h  ↔ 1h: {data['volatility']['6h_1h']}"
 
+        # -------- MARKET STRUCTURE (extra block) --------
+    ms = await run_data_task(
+        update,
+        "market structure",
+        compute_market_structure,
+        sorted(SUPPORTED_TICKERS),
+        12,  # lookback hours for adaptive normalization
+    )
+
+    if ms:
+        text += "\n\n=== MARKET STRUCTURE ===\n\n"
+        text += f"Coherence: {ms.get('coherence_label')} ({_fmt_number(ms.get('coherence'), 2)})\n"
+        text += f"Compression: {ms.get('compression_label')} ({_fmt_number(ms.get('compression_score'), 0)})\n"
+        text += f"Driver: {_fmt_text(ms.get('driver'))}\n"
+        text += f"Regime: {_fmt_text(ms.get('regime'))}"
+
     await safe_reply(update, text, reply_markup=section_nav_keyboard(context))
 
 
@@ -1282,4 +1299,5 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
