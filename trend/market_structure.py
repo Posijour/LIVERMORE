@@ -100,12 +100,17 @@ def _normalize_symbol(symbol: Optional[str]) -> Optional[str]:
     return value
 
 def _extract_symbol(row: dict) -> Optional[str]:
-    return row.get("symbol") or row.get("data", {}).get("symbol")
+    data = row.get("data", {}) if isinstance(row.get("data"), dict) else {}
+    return row.get("symbol") or data.get("symbol") or row.get("ticker") or data.get("ticker")
 
 def _extract_risk_value(row: dict) -> Optional[float]:
-    # prefer avg_risk (used across your codebase)
-    v = row.get("data", {}).get("avg_risk")
-    return _to_float(v)
+    # risk_eval may contain either aggregated avg_risk or per-row risk values.
+    data = row.get("data", {}) if isinstance(row.get("data"), dict) else {}
+    for key in ("avg_risk", "risk", "risk_score"):
+        value = _to_float(data.get(key))
+        if value is not None:
+            return value
+    return None
 
 def _extract_mci(row: dict) -> Optional[float]:
     v = row.get("data", {}).get("mci")
@@ -415,4 +420,5 @@ def compute_market_structure(
 
         "regime": regime,
     }
+
 
