@@ -182,19 +182,129 @@ def _hourly_dispersion_from_risk_rows(
             sym_map[sym] = (ts, float(v))
 
     # take last max_points buckets (most recent)
+        # take last max_points buckets (most recent)
     bucket_keys = sorted(buckets.keys())[-max_points:]
     dispersions: List[float] = []
+
+    MIN_COVERAGE = max(3, int(len(supported_norm) * 0.65))  # ~65% coverage, e.g. 10/16
+
     for b in bucket_keys:
         sym_map = buckets[b]
         vals = []
         for sym in supported_norm:
             if sym in sym_map:
                 vals.append(sym_map[sym][1])
+
+        # ✅ coverage guard: hourly dispersion only makes sense with stable N
+        if len(vals) < MIN_COVERAGE:
+            continue
+
         d = _stdev(vals)
         if d is not None:
             dispersions.append(float(d))
+
     return dispersions
 
+def _hourly_impulses_12h(
+    risk_rows_12h: List[dict],
+    bybit_rows_12h: List[dict],
+    deribit_rows_12h: List[dict],
+    supported_norm: List[str],
+    max_points: int = 12,
+) -> dict:
+    """
+    Returns hourly samples (up to max_points) for:
+      - futures market avg risk
+      - options mci_slope abs avg (BTC/ETH market rows)
+      - deribit iv_slope abs avg
+    Used ONLY for normalization (lo/hi), not for the main signal.
+    """
+    # --- futures: bucket -> symbol -> latest (ts,value)
+    fut_buckets: Dict[int, Dict[str, Tuple[int, float]]] = {}
+    for r in (risk_rows_12h or []):
+        sym = _extract_symbol(r)
+        if not sym:
+            continue
+        sym = _normalize_symbol(sym)
+        if sym not in supported_norm:
+            continue
+        ts = r.get("ts")
+        if not isinstance(ts, (int, float)):
+            continue
+        ts = int(ts)
+        v = _extract_risk_value(r)
+        if v is None:
+            continue
+        b = _bucket_hour(ts)
+        m = fut_buckets.setdefault(b, {})
+        prev = m.get(sym)
+        if prev is None or ts > prev[0]:
+            m[sym] = (ts, float(v))
+
+    # --- options: bucket -> list of abs(mci_slope)
+    opt_buckets: Dict[int, List[float]] = {}
+    for r in (bybit_rows_12h or []):
+        ts = r.get("ts")
+        if not isinstance(ts, (int, float)):
+            continue
+        ts = int(ts)
+        v = _extract_mci_slope(r)
+        if v is None:
+            continue
+        b = _bucket_hour(ts)
+        opt_buckets.setdefault(b, []).append(abs(float(v)))
+
+    # --- vol: bucket -> list of abs(iv_slope)
+    vol_buckets: Dict[int, List[float]] = {}
+    for r in (deribit_rows_12h or []):
+        ts = r.get("ts")
+        if not isinstance(ts, (int, float)):
+            continue
+        ts = int(ts)
+        v = _extract_iv_slope(r)
+        if v is None:
+            continue
+        b = _bucket_hour(ts)
+        vol_buckets.setdefault(b, []).append(abs(float(v)))
+
+    # pick last buckets present in any of the series
+    all_buckets = sorted(set(fut_buckets.keys()) | set(opt_buckets.keys()) | set(vol_buckets.keys()))[-max_points:]
+
+    fut_avg_series: List[float] = []
+    opt_abs_series: List[float] = []
+    vol_abs_series: List[float] = []
+
+    MIN_COVERAGE = max(3, int(len(supported_norm) * 0.65))
+
+    for b in all_buckets:
+        # futures avg risk for this hour (only if enough symbols)
+        sym_map = fut_buckets.get(b, {})
+        if sym_map:
+            vals = [sym_map[s][1] for s in supported_norm if s in sym_map]
+            if len(vals) >= MIN_COVERAGE:
+                fut_avg_series.append(sum(vals) / len(vals))
+
+        # options abs avg slope
+        xs = opt_buckets.get(b)
+        if xs:
+            opt_abs_series.append(sum(xs) / len(xs))
+
+        # vol abs avg slope
+        ys = vol_buckets.get(b)
+        if ys:
+            vol_abs_series.append(sum(ys) / len(ys))
+
+    # convert to hourly impulses where possible
+    def to_impulses(series: List[float]) -> List[float]:
+        if len(series) < 2:
+            return []
+        return [abs(series[i] - series[i - 1]) for i in range(1, len(series))]
+
+    return {
+        "fut_impulses": to_impulses(fut_avg_series),
+        "opt_impulses": opt_abs_series,  # already "activity", no delta needed
+        "vol_impulses": vol_abs_series,  # already "activity", no delta needed
+    }
 
 # ----------------- main compute -----------------
 
@@ -354,15 +464,49 @@ def compute_market_structure(
     if len(iv_series) >= 2:
         vol_impulse = iv_series[-1] - iv_series[0]
 
-    impulses = {
-        "FUTURES": _safe_abs(fut_impulse),
-        "OPTIONS": _safe_abs(opt_impulse),
-        "VOL": _safe_abs(vol_impulse),
+        # --- Cross-layer driver (LIVE) with 12h adaptive normalization ---
+    # Current impulses (1h)
+    # futures impulse: change in market avg risk over 1h
+    fut_impulse_abs = _safe_abs(fut_impulse)
+
+    # options impulse: abs(avg mci_slope over 1h)
+    opt_impulse_abs = _safe_abs(opt_impulse)
+
+    # vol impulse: abs(delta iv_slope over 1h)
+    vol_impulse_abs = _safe_abs(vol_impulse)
+
+    # Build 12h reference ranges (<= 12 points), no heavy scans:
+    supported_norm = [_normalize_symbol(s) for s in supported_tickers]
+    ref = _hourly_impulses_12h(
+        risk_rows_12h or [],
+        bybit_rows_12h or [],
+        deribit_rows_12h or [],
+        supported_norm=supported_norm,
+        max_points=12,
+    )
+
+    def lohi(xs: List[float]) -> Tuple[Optional[float], Optional[float]]:
+        xs = [float(x) for x in xs if _is_num(x)]
+        if not xs:
+            return None, None
+        return min(xs), max(xs)
+
+    fut_lo, fut_hi = lohi(ref.get("fut_impulses", []))
+    opt_lo, opt_hi = lohi(ref.get("opt_impulses", []))
+    vol_lo, vol_hi = lohi(ref.get("vol_impulses", []))
+
+    fut_norm = _norm01(fut_impulse_abs, fut_lo, fut_hi)
+    opt_norm = _norm01(opt_impulse_abs, opt_lo, opt_hi)
+    vol_norm = _norm01(vol_impulse_abs, vol_lo, vol_hi)
+
+    norm_impulses = {
+        "FUTURES": fut_norm,
+        "OPTIONS": opt_norm,
+        "VOL": vol_norm,
     }
 
-    # pick leader
     sorted_imp = sorted(
-        [(k, v) for k, v in impulses.items() if v is not None],
+        [(k, v) for k, v in norm_impulses.items() if v is not None],
         key=lambda kv: kv[1],
         reverse=True,
     )
@@ -372,23 +516,27 @@ def compute_market_structure(
         driver_conf = 0.0
     else:
         top_k, top_v = sorted_imp[0]
-        # threshold to avoid noise
-        noise_floor = 0.02  # small, because values are already deltas/slopes
+
+        # ✅ normalized space noise floor: treat < 0.20 as noise (tunable)
+        noise_floor = 0.20
         if top_v < noise_floor:
             driver = "NONE"
             driver_conf = 0.0
         elif len(sorted_imp) >= 2:
             second_v = sorted_imp[1][1]
-            # if within 15% => ALIGNED
+            # ✅ ALIGNED if within 15% of top in normalized space
             if second_v > 0 and (top_v - second_v) / top_v <= 0.15:
                 driver = "ALIGNED"
-                driver_conf = 0.6
+                driver_conf = 0.65
             else:
                 driver = f"{top_k}_LEAD"
-                driver_conf = 0.75
+                # confidence grows with separation
+                sep = (top_v - second_v) if second_v is not None else top_v
+                driver_conf = 0.60 + 0.30 * max(0.0, min(1.0, sep))
         else:
             driver = f"{top_k}_LEAD"
-            driver_conf = 0.6
+            driver_conf = 0.60 + 0.30 * max(0.0, min(1.0, top_v))
+
 
     # --- Diagnostic regime tag ---
     if compression_label == "EXTREME" and driver in ("OPTIONS_LEAD", "VOL_LEAD"):
@@ -420,5 +568,6 @@ def compute_market_structure(
 
         "regime": regime,
     }
+
 
 
