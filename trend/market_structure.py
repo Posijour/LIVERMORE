@@ -341,6 +341,13 @@ def compute_market_structure(
     disp_norm = _norm01(dispersion_xs_now, disp_lo, disp_hi)
     coherence = None if disp_norm is None else (1.0 - disp_norm)
 
+    debug_disp = {
+        "disp_now": dispersion_xs_now,
+        "lo": disp_lo,
+        "hi": disp_hi,
+        "norm": disp_norm,
+    }
+
     if coherence is None:
         coherence_label = "N/A"
     elif coherence >= 0.67:
@@ -363,6 +370,13 @@ def compute_market_structure(
     iv_norm = _norm01(iv_slope_abs_now, iv_lo, iv_hi)
     vbi_comp = None if iv_norm is None else (1.0 - iv_norm)
 
+    debug_vbi = {
+        "iv_abs": iv_slope_abs_now,
+        "lo": iv_lo,
+        "hi": iv_hi,
+        "norm": iv_norm,
+    }
+
     # MCI component: prefer low MCI (compression) OR low abs(mci_slope)
     mci_1h = [_extract_mci(r) for r in (bybit_rows_1h or [])]
     mci_1h = [v for v in mci_1h if _is_num(v)]
@@ -375,6 +389,13 @@ def compute_market_structure(
 
     mci_norm = _norm01(mci_now, mci_lo, mci_hi)
     mci_comp = None if mci_norm is None else (1.0 - mci_norm)
+
+    debug_mci = {
+        "mci": mci_now,
+        "lo": mci_lo,
+        "hi": mci_hi,
+        "norm": mci_norm,
+    }
 
     # dispersion component uses same dispersion_xs normalization (low dispersion => more compression)
     disp_comp = None if disp_norm is None else (1.0 - disp_norm)
@@ -475,6 +496,7 @@ def compute_market_structure(
         "VOL": vol_norm,
     }
 
+    debug_driver_norms = norm_impulses.copy()
     available = [(k, v) for k, v in norm_impulses.items() if v is not None]
 
     if len(available) < 2:
@@ -517,15 +539,20 @@ def compute_market_structure(
         "dispersion_xs": dispersion_xs_now,
         "dispersion_xs_lo": disp_lo,
         "dispersion_xs_hi": disp_hi,
-
+    
         "compression_score": compression_score,
         "compression_label": compression_label,
         "compression_vbi_comp": vbi_comp,
         "compression_mci_comp": mci_comp,
         "compression_disp_comp": disp_comp,
-
+    
         "driver": driver,
         "driver_confidence": driver_conf,
-
+    
         "regime": regime,
+    
+        "debug_disp": debug_disp,
+        "debug_vbi": debug_vbi,
+        "debug_mci": debug_mci,
+        "debug_driver_norms": debug_driver_norms,
     }
