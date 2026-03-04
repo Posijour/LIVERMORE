@@ -42,11 +42,29 @@ def _fmt_float(x: Optional[float], digits: int = 2) -> str:
 # ----------------- data extraction -----------------
 
 def _bucket_hour(ts: int) -> int:
-    # ts in seconds, bucket by hour
-    return ts - (ts % 3600)
+    # ts comes in milliseconds from parse_window/client fetch
+    hour_ms = 3600 * 1000
+    return ts - (ts % hour_ms)
+
+
+def _normalize_symbol(symbol: Optional[str]) -> Optional[str]:
+    if not isinstance(symbol, str) or not symbol:
+        return None
+
+    value = symbol.upper()
+
+    for sep in ("-", "_", "/", ":"):
+        value = value.split(sep, 1)[0]
+
+    for quote in ("USDT", "USD", "PERP"):
+        if value.endswith(quote):
+            value = value[: -len(quote)]
+            break
+
+    return value
 
 def _extract_symbol(row: dict) -> Optional[str]:
-    return row.get("data", {}).get("symbol")
+    return row.get("symbol") or row.get("data", {}).get("symbol")
 
 def _extract_risk_value(row: dict) -> Optional[float]:
     # prefer avg_risk (used across your codebase)
@@ -77,7 +95,7 @@ def _latest_per_symbol(rows: List[dict], value_fn) -> Dict[str, float]:
     """
     best: Dict[str, Tuple[int, float]] = {}
     for r in rows:
-        sym = _extract_symbol(r)
+        sym = _normalize_symbol(_extract_symbol(r))
         if not sym:
             continue
         ts = r.get("ts")
@@ -104,10 +122,12 @@ def _hourly_dispersion_from_risk_rows(
     """
     # bucket -> symbol -> (ts, value)
     buckets: Dict[int, Dict[str, Tuple[int, float]]] = {}
+    supported_norm = {_normalize_symbol(s) for s in supported_tickers}
+    supported_norm.discard(None)
 
     for r in risk_rows_12h:
-        sym = _extract_symbol(r)
-        if sym not in supported_tickers:
+        sym = _normalize_symbol(_extract_symbol(r))
+        if sym not in supported_norm:
             continue
         ts = r.get("ts")
         if not isinstance(ts, (int, float)):
@@ -128,7 +148,7 @@ def _hourly_dispersion_from_risk_rows(
     for b in bucket_keys:
         sym_map = buckets[b]
         vals = []
-        for sym in supported_tickers:
+        for sym in supported_norm:
             if sym in sym_map:
                 vals.append(sym_map[sym][1])
         d = _stdev(vals)
@@ -169,9 +189,12 @@ def compute_market_structure(
     deribit_rows_12h = load_deribit(ts_from_12h, ts_to_now)
 
     # --- Futures coherence (now) ---
+    supported_norm = [_normalize_symbol(s) for s in supported_tickers]
+    supported_norm = [s for s in supported_norm if s]
+
     latest_risk = _latest_per_symbol(risk_rows_30m or [], _extract_risk_value)
     # keep only supported tickers
-    risk_vals_now = [latest_risk.get(sym) for sym in supported_tickers]
+    risk_vals_now = [latest_risk.get(sym) for sym in supported_norm]
     risk_vals_now = [v for v in risk_vals_now if _is_num(v)]
 
     dispersion_xs_now = _stdev(risk_vals_now)
@@ -243,8 +266,8 @@ def compute_market_structure(
     # approximate earliest by taking first-seen per symbol (not perfect but stable)
     earliest: Dict[str, Tuple[int, float]] = {}
     for r in (risk_rows_1h or []):
-        sym = _extract_symbol(r)
-        if sym not in supported_tickers:
+        sym = _normalize_symbol(_extract_symbol(r))
+        if sym not in supported_norm:
             continue
         ts = r.get("ts")
         if not isinstance(ts, (int, float)):
@@ -257,8 +280,8 @@ def compute_market_structure(
         if prev is None or ts < prev[0]:
             earliest[sym] = (ts, float(v))
 
-    start_vals = [earliest.get(s, (None, None))[1] for s in supported_tickers]
-    end_vals = [latest_risk_1h.get(s) for s in supported_tickers]
+    start_vals = [earliest.get(s, (None, None))[1] for s in supported_norm]
+    end_vals = [latest_risk_1h.get(s) for s in supported_norm]
     start_vals = [v for v in start_vals if _is_num(v)]
     end_vals = [v for v in end_vals if _is_num(v)]
     fut_impulse = None
