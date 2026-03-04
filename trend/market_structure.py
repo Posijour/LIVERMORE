@@ -12,6 +12,17 @@ from data.queries import load_risk, load_bybit_market_state, load_deribit
 def _is_num(x) -> bool:
     return isinstance(x, (int, float)) and not (isinstance(x, float) and math.isnan(x))
 
+def _to_float(x) -> Optional[float]:
+    if _is_num(x):
+        return float(x)
+    if isinstance(x, str):
+        try:
+            v = float(x.strip())
+        except ValueError:
+            return None
+        return None if math.isnan(v) else v
+    return None
+
 def _stdev(xs: List[float]) -> Optional[float]:
     xs = [float(x) for x in xs if _is_num(x)]
     if len(xs) < 2:
@@ -54,11 +65,22 @@ def _bucket_hour(ts: int) -> int:
     return ts - (ts % hour_ms)
 
 
-def _ts_to_ms(ts: Optional[float]) -> Optional[int]:
-    if not isinstance(ts, (int, float)):
-        return None
-    value = int(ts)
-    return value * 1000 if value < 10_000_000_000 else value
+def _ts_to_ms(ts) -> Optional[int]:
+    v = _to_float(ts)
+    if v is not None:
+        value = int(v)
+        return value * 1000 if value < 10_000_000_000 else value
+
+    if isinstance(ts, str):
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.timestamp() * 1000)
+        except ValueError:
+            return None
+
+    return None
 
 
 def _normalize_symbol(symbol: Optional[str]) -> Optional[str]:
@@ -83,23 +105,23 @@ def _extract_symbol(row: dict) -> Optional[str]:
 def _extract_risk_value(row: dict) -> Optional[float]:
     # prefer avg_risk (used across your codebase)
     v = row.get("data", {}).get("avg_risk")
-    return float(v) if _is_num(v) else None
+    return _to_float(v)
 
 def _extract_mci(row: dict) -> Optional[float]:
     v = row.get("data", {}).get("mci")
-    return float(v) if _is_num(v) else None
+    return _to_float(v)
 
 def _extract_mci_slope(row: dict) -> Optional[float]:
     v = row.get("data", {}).get("mci_slope")
-    return float(v) if _is_num(v) else None
+    return _to_float(v)
 
 def _extract_iv_slope(row: dict) -> Optional[float]:
     # your bot already reads "iv_slope" and sometimes "iv_slope_avg"
     data = row.get("data", {})
     for k in ("iv_slope", "iv_slope_avg"):
-        v = data.get(k)
-        if _is_num(v):
-            return float(v)
+        v = _to_float(data.get(k))
+        if v is not None:
+            return v
     return None
 
 
@@ -393,3 +415,4 @@ def compute_market_structure(
 
         "regime": regime,
     }
+
