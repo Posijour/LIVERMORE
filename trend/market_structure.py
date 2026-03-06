@@ -31,6 +31,22 @@ def _stdev(xs: List[float]) -> Optional[float]:
     var = sum((x - m) ** 2 for x in xs) / (len(xs) - 1)
     return math.sqrt(var)
 
+def _trimmed_stdev(xs: List[float], trim_ratio: float = 0.1) -> Optional[float]:
+    xs = [float(x) for x in xs if _is_num(x)]
+    if len(xs) < 2:
+        return 0.0 if xs else None
+
+    if len(xs) >= 6:
+        ys = sorted(xs)
+        trim = max(1, int(len(ys) * trim_ratio))
+        if len(ys) > 2 * trim:
+            ys = ys[trim:-trim]
+        else:
+            ys = xs
+        return _stdev(ys)
+
+    return _stdev(xs)
+
 def _clamp01(x: Optional[float]) -> Optional[float]:
     if x is None:
         return None
@@ -193,7 +209,7 @@ def _hourly_dispersion_from_risk_rows(
         if len(vals) < MIN_COVERAGE:
             continue
 
-        d = _stdev(vals)
+        d = _trimmed_stdev(vals, trim_ratio=0.1)
         if d is not None:
             dispersions.append(float(d))
 
@@ -331,7 +347,7 @@ def compute_market_structure(
     risk_vals_now = [latest_risk.get(sym) for sym in supported_norm]
     risk_vals_now = [v for v in risk_vals_now if _is_num(v)]
 
-    dispersion_xs_now = _stdev(risk_vals_now)
+    dispersion_xs_now = _trimmed_stdev(risk_vals_now, trim_ratio=0.1)
 
     # adaptive normalization for dispersion_xs using 12h hourly samples (max 12 points)
     disp_samples = _hourly_dispersion_from_risk_rows(risk_rows_12h or [], supported_tickers, max_points=12)
@@ -413,12 +429,12 @@ def compute_market_structure(
     else:
         weight_sum = sum(weight for _, weight in available_components)
         weighted_score = sum(value * weight for value, weight in available_components) / weight_sum
-        compression_score = 100.0 * weighted_score
-        if compression_score >= 75:
+        compression_score = weighted_score
+        if compression_score >= 0.75:
             compression_label = "EXTREME"
-        elif compression_score >= 60:
+        elif compression_score >= 0.60:
             compression_label = "HIGH"
-        elif compression_score >= 40:
+        elif compression_score >= 0.40:
             compression_label = "MEDIUM"
         else:
             compression_label = "LOW"
@@ -556,3 +572,4 @@ def compute_market_structure(
         "debug_mci": debug_mci,
         "debug_driver_norms": debug_driver_norms,
     }
+
