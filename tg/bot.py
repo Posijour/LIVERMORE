@@ -94,10 +94,17 @@ def main_menu_keyboard():
 
 def section_nav_keyboard(context):
     back_target = context.user_data.get("back_target", "main:menu")
+    last_action = (context.user_data.get("last_action") or {}).get("action")
+
+    if last_action in {"alerts", "event", "dispersion", "information"}:
+        back_label = "Menu"
+        back_target = "main:menu"
+    else:
+        back_label = "⬅ Back"
 
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("⬅ Back", callback_data=back_target),
+            InlineKeyboardButton(back_label, callback_data=back_target),
             InlineKeyboardButton("🔄 Refresh", callback_data="main:refresh"),
         ],
     ])
@@ -464,8 +471,6 @@ def render_options_snapshot(window: str, payload: dict) -> str:
         "Liquidity (OKX):\n"
         f"• OLSI: {_fmt_number(okx.get('okx_olsi_latest'), 3)} "
         f"({arrow(okx.get('okx_olsi_slope'))})\n"
-        f"• Avg/Range: {_fmt_number(okx.get('okx_olsi_avg'), 3)} "
-        f"[{_fmt_number(okx.get('okx_olsi_min'), 3)} .. {_fmt_number(okx.get('okx_olsi_max'), 3)}]\n"
         f"• Regime: {_fmt_text(okx.get('okx_liquidity_regime'))}\n\n"
 
         "Dislocation (Bybit ↔ OKX):\n"
@@ -1291,6 +1296,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
