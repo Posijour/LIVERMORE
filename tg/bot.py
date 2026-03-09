@@ -812,23 +812,8 @@ def can_send_alert(symbol, div_type, event_ts):
     """
     key = (symbol, div_type)
 
-    if isinstance(event_ts, str):
-        if event_ts.isdigit():
-            event_ts = int(event_ts)
-        else:
-            try:
-                dt = datetime.fromisoformat(event_ts.replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                event_ts = int(dt.timestamp() * 1000)
-            except ValueError:
-                return False
-
-    if isinstance(event_ts, (int, float)):
-        event_ts = int(event_ts)
-        if event_ts < 10_000_000_000:
-            event_ts *= 1000
-    else:
+    event_ts = normalize_event_ts_ms(event_ts)
+    if event_ts is None:
         return False
 
     last_event_ts = _LAST_ALERTS.get(key)
@@ -842,23 +827,8 @@ def can_send_alert(symbol, div_type, event_ts):
     return True
 
 def can_send_anomaly(anomaly_key, event_ts):
-    if isinstance(event_ts, str):
-        if event_ts.isdigit():
-            event_ts = int(event_ts)
-        else:
-            try:
-                dt = datetime.fromisoformat(event_ts.replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                event_ts = int(dt.timestamp() * 1000)
-            except ValueError:
-                return False
-
-    if isinstance(event_ts, (int, float)):
-        event_ts = int(event_ts)
-        if event_ts < 10_000_000_000:
-            event_ts *= 1000
-    else:
+    event_ts = normalize_event_ts_ms(event_ts)
+    if event_ts is None:
         return False
 
     last_event_ts = _LAST_ANOMALIES.get(anomaly_key)
@@ -901,24 +871,8 @@ def detect_buildup_anomalies(alert_rows):
     if not buildup_rows:
         return []
 
-    def to_ms(value):
-        if isinstance(value, str):
-            if value.isdigit():
-                value = int(value)
-            else:
-                dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                value = int(dt.timestamp() * 1000)
-        if isinstance(value, (int, float)):
-            value = int(value)
-            if value < 10_000_000_000:
-                value *= 1000
-            return value
-        return None
-
     for row in buildup_rows:
-        row["ts_ms"] = to_ms(row["ts"])
+        row["ts_ms"] = normalize_event_ts_ms(row["ts"])
 
     buildup_rows = [r for r in buildup_rows if r["ts_ms"] is not None]
     buildup_rows.sort(key=lambda x: x["ts_ms"])
@@ -974,6 +928,29 @@ def detect_buildup_anomalies(alert_rows):
                 break
 
     return anomalies
+
+
+def normalize_event_ts_ms(value):
+    if isinstance(value, str):
+        if value.isdigit():
+            value = int(value)
+        else:
+            try:
+                dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            value = int(dt.timestamp() * 1000)
+
+    if isinstance(value, (int, float)):
+        value = int(value)
+        if value < 10_000_000_000:
+            value *= 1000
+        return value
+
+    return None
 
 
 async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1457,6 +1434,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
