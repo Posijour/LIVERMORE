@@ -5,11 +5,17 @@ from datetime import datetime, timezone
 import time
 from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
-from loaders import load_event
 from trend.dispersion import compute_dispersion
 from trend.market_structure import compute_market_structure
 from time_utils import parse_window
-from data.queries import load_deribit, load_divergence, load_okx_market_state, load_bybit_market_state, load_risk
+from data.queries import (
+    load_bybit_market_state,
+    load_deribit,
+    load_divergence,
+    load_event,
+    load_okx_market_state,
+    load_risk,
+)
 from main import persist_snapshot_state, run_snapshot
 from persistence.state_history import get_state_persistence_hours
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -1434,6 +1440,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
