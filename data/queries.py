@@ -19,3 +19,7 @@ def load_meta(ts_from, ts_to, symbol=None):
 
 def load_divergence(ts_from, ts_to, symbol=None):
     return client.fetch("risk_divergence", ts_from, ts_to, symbol=symbol)
+
+
+def load_event(event, ts_from, ts_to, symbol=None):
+    return client.fetch(event, ts_from, ts_to, symbol=symbol)
