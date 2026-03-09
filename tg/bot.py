@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import time
 from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
+from loaders import load_event
 from trend.dispersion import compute_dispersion
 from trend.market_structure import compute_market_structure
 from time_utils import parse_window
@@ -35,6 +36,9 @@ _PERSISTENCE_CACHE = {
     "value": None,
     "at": 0.0,
 }
+_LAST_ANOMALIES = {}   # anomaly_key -> event_ts
+ANOMALY_ALERT_COOLDOWN = 30 * 60  # 30 минут
+ALERT_CHAT_ID = -1003829481191
 
 
 # ---------------- CONFIG ----------------
@@ -837,6 +841,141 @@ def can_send_alert(symbol, div_type, event_ts):
     _LAST_ALERTS[key] = event_ts
     return True
 
+def can_send_anomaly(anomaly_key, event_ts):
+    if isinstance(event_ts, str):
+        if event_ts.isdigit():
+            event_ts = int(event_ts)
+        else:
+            try:
+                dt = datetime.fromisoformat(event_ts.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                event_ts = int(dt.timestamp() * 1000)
+            except ValueError:
+                return False
+
+    if isinstance(event_ts, (int, float)):
+        event_ts = int(event_ts)
+        if event_ts < 10_000_000_000:
+            event_ts *= 1000
+    else:
+        return False
+
+    last_event_ts = _LAST_ANOMALIES.get(anomaly_key)
+    if last_event_ts and event_ts <= last_event_ts:
+        return False
+
+    if last_event_ts and (event_ts - last_event_ts) < ANOMALY_ALERT_COOLDOWN * 1000:
+        return False
+
+    _LAST_ANOMALIES[anomaly_key] = event_ts
+    return True
+
+def detect_buildup_anomalies(alert_rows):
+    """
+    alert_rows: список событий alert_sent
+    Ищем:
+    1) repeated buildups per symbol
+    2) cross-market buildup burst
+    """
+    buildup_rows = []
+
+    for r in alert_rows:
+        data = r.get("data", {}) or {}
+        if data.get("type") != "BUILDUP":
+            continue
+
+        ts = r.get("ts") or r.get("created_at")
+        symbol = data.get("symbol")
+        direction = data.get("direction")
+
+        if not ts or not symbol:
+            continue
+
+        buildup_rows.append({
+            "ts": ts,
+            "symbol": symbol,
+            "direction": direction,
+        })
+
+    if not buildup_rows:
+        return []
+
+    def to_ms(value):
+        if isinstance(value, str):
+            if value.isdigit():
+                value = int(value)
+            else:
+                dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                value = int(dt.timestamp() * 1000)
+        if isinstance(value, (int, float)):
+            value = int(value)
+            if value < 10_000_000_000:
+                value *= 1000
+            return value
+        return None
+
+    for row in buildup_rows:
+        row["ts_ms"] = to_ms(row["ts"])
+
+    buildup_rows = [r for r in buildup_rows if r["ts_ms"] is not None]
+    buildup_rows.sort(key=lambda x: x["ts_ms"])
+
+    anomalies = []
+
+    # ---------- anomaly 1: repeated buildups per symbol ----------
+    per_symbol = {}
+    for row in buildup_rows:
+        per_symbol[row["symbol"]] = per_symbol.get(row["symbol"], 0) + 1
+
+    top_symbol = None
+    top_count = 0
+    for symbol, count in per_symbol.items():
+        if count > top_count:
+            top_symbol = symbol
+            top_count = count
+
+    if top_symbol and top_count >= 3:
+        last_ts = max(r["ts_ms"] for r in buildup_rows if r["symbol"] == top_symbol)
+        anomalies.append({
+            "key": f"REPEATED_BUILDUP:{top_symbol}",
+            "event_ts": last_ts,
+            "text": (
+                "⚠️ Futures anomaly detected\n"
+                f"{top_symbol} — repeated buildups\n"
+                f"Count: {top_count}"
+            )
+        })
+
+    # ---------- anomaly 2: multi-coin buildup burst ----------
+    # 5+ buildups within 3 minutes and at least 3 distinct symbols
+    n = len(buildup_rows)
+    left = 0
+    for right in range(n):
+        while buildup_rows[right]["ts_ms"] - buildup_rows[left]["ts_ms"] > 180000:
+            left += 1
+
+        window = buildup_rows[left:right + 1]
+        if len(window) >= 5:
+            distinct_symbols = {r["symbol"] for r in window}
+            if len(distinct_symbols) >= 3:
+                last_ts = window[-1]["ts_ms"]
+                anomalies.append({
+                    "key": "MULTI_COIN_BUILDUP_BURST",
+                    "event_ts": last_ts,
+                    "text": (
+                        "⚠️ Futures anomaly detected\n"
+                        "Multi-coin buildup burst\n"
+                        f"Events: {len(window)} | Symbols: {len(distinct_symbols)}"
+                    )
+                })
+                break
+
+    return anomalies
+
+
 async def event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from trend.event_anchored import event_anchored_analysis
     remember_last_action(context, "event")
@@ -1052,6 +1191,28 @@ async def divergence_watcher(app):
     ts_from, ts_to = parse_window_safe("2h")
     rows = await asyncio.to_thread(load_divergence, ts_from, ts_to)
 
+        # ---------- FUTURES ANOMALIES (BUILDUP-BASED) ----------
+    a_from, a_to = parse_window_safe("30m")
+    alert_rows = await asyncio.to_thread(load_event, "alert_sent", a_from, a_to)
+
+    anomalies = detect_buildup_anomalies(alert_rows)
+
+    for anomaly in anomalies:
+        if not can_send_anomaly(anomaly["key"], anomaly["event_ts"]):
+            continue
+
+        try:
+            await app.bot.send_message(
+                chat_id=ALERT_CHAT_ID,
+                text=anomaly["text"],
+            )
+        except BadRequest as exc:
+            logger.error(
+                "Watcher failed to deliver anomaly alert to chat %s: %s",
+                ALERT_CHAT_ID,
+                exc,
+            )
+
     for r in rows:
         data = r.get("data", {})
         symbol = data.get("symbol")
@@ -1072,11 +1233,11 @@ async def divergence_watcher(app):
         # ❗️ ВСТАВЬ СВОЙ CHAT_ID
         try:
             await app.bot.send_message(
-                chat_id=-1003829481191,
+                chat_id=ALERT_CHAT_ID,
                 text=text
             )
         except BadRequest as exc:
-            logger.error("Watcher failed to deliver alert to chat %s: %s", -1003829481191, exc)
+            logger.error("Watcher failed to deliver alert to chat %s: %s", ALERT_CHAT_ID, exc)
 
 
 async def divergence_watcher_job(context: ContextTypes.DEFAULT_TYPE):
@@ -1296,6 +1457,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
