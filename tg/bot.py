@@ -136,7 +136,8 @@ INFO_TEXT = (
     "  How long the current market regime has been active\n\n"
     "The bot does not generate signals\n"
     "and does not suggest actions.\n\n"
-    "Interpretation is intentionally external."
+    "Interpretation is intentionally external.\n\n"
+    '<a href="https://www.notion.so/Livermore-Market-Structure-Monitoring-System-31e600b586bc80acb2cecdfdf1f413df">More information</a>'
 )
 
 async def lock_menu(query, text="⏳ Loading…"):
@@ -660,12 +661,13 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         INFO_TEXT,
         reply_markup=section_nav_keyboard(context),
+        parse_mode=ParseMode.HTML,
     )
 
 
-async def information(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    remember_last_action(context, "information")
-    await safe_reply(update, INFO_TEXT, reply_markup=section_nav_keyboard(context))
+async def information(update: Update, context: ContextTypes.DEFAULT_TYPE):␊
+    remember_last_action(context, "information")␊
+    await safe_reply(update, INFO_TEXT, reply_markup=section_nav_keyboard(context), parse_mode=ParseMode.HTML)
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1440,6 +1442,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
