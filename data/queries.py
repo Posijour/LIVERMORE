@@ -24,17 +24,4 @@ def load_event(event, ts_from, ts_to, symbol=None):
     return client.fetch(event, ts_from, ts_to, symbol=symbol)
 
 def load_latest_log_ts():
-    res = (
-        client.client
-        .table("logs")
-        .select("ts")
-        .order("ts", desc=True)
-        .limit(1)
-        .execute()
-    )
-
-    rows = res.data or []
-    if not rows:
-        return None
-
-    return rows[0]["ts"]
+    return client.fetch_latest_log_ts()
