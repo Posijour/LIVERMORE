@@ -501,6 +501,7 @@ async def safe_reply(
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = None,
+    disable_web_page_preview: bool | None = None,
 ):
     target = None
     query = update.callback_query
@@ -520,29 +521,64 @@ async def safe_reply(
     if query and chunks:
         first_markup = markup if len(chunks) == 1 else None
         try:
-            await query.edit_message_text(chunks[0], reply_markup=first_markup, parse_mode=parse_mode)
+            await query.edit_message_text(
+                chunks[0],
+                reply_markup=first_markup,
+                parse_mode=parse_mode,
+                disable_web_page_preview=disable_web_page_preview,
+            )
         except BadRequest:
-            await target.reply_text(chunks[0], reply_markup=first_markup, parse_mode=parse_mode)
+            await target.reply_text(
+                chunks[0],
+                reply_markup=first_markup,
+                parse_mode=parse_mode,
+                disable_web_page_preview=disable_web_page_preview,
+            )
         except TimedOut:
             await asyncio.sleep(1)
-            await query.edit_message_text(chunks[0], reply_markup=first_markup, parse_mode=parse_mode)
+            await query.edit_message_text(
+                chunks[0],
+                reply_markup=first_markup,
+                parse_mode=parse_mode,
+                disable_web_page_preview=disable_web_page_preview,
+            )
 
         for idx, chunk in enumerate(chunks[1:], start=1):
             current_markup = markup if idx == len(chunks) - 1 else None
             try:
-                await target.reply_text(chunk, reply_markup=current_markup, parse_mode=parse_mode)
+                await target.reply_text(
+                    chunk,
+                    reply_markup=current_markup,
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=disable_web_page_preview,
+                )
             except TimedOut:
                 await asyncio.sleep(1)
-                await target.reply_text(chunk, reply_markup=current_markup, parse_mode=parse_mode)
+                await target.reply_text(
+                    chunk,
+                    reply_markup=current_markup,
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=disable_web_page_preview,
+                )
         return
 
     for idx, chunk in enumerate(chunks):
         current_markup = markup if idx == len(chunks) - 1 else None
         try:
-            await target.reply_text(chunk, reply_markup=current_markup, parse_mode=parse_mode)
+            await target.reply_text(
+                chunk,
+                reply_markup=current_markup,
+                parse_mode=parse_mode,
+                disable_web_page_preview=disable_web_page_preview,
+            )
         except TimedOut:
             await asyncio.sleep(1)
-            await target.reply_text(chunk, reply_markup=current_markup, parse_mode=parse_mode)
+            await target.reply_text(
+                chunk,
+                reply_markup=current_markup,
+                parse_mode=parse_mode,
+                disable_web_page_preview=disable_web_page_preview,
+            )
 
 
 async def run_data_task(update: Update, task_name: str, fn, *args, **kwargs):
@@ -669,12 +705,12 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def information(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_action(context, "information")
-        await safe_reply(
-            update,
-            INFO_TEXT,
-            reply_markup=section_nav_keyboard(context),
-            disable_web_page_preview=True,
-        )
+    await safe_reply(
+        update,
+        INFO_TEXT,
+        reply_markup=section_nav_keyboard(context),
+        disable_web_page_preview=True,
+    )
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1449,6 +1485,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
