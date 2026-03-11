@@ -124,13 +124,14 @@ def help_keyboard():
 
 
 INFO_TEXT = (
-    "LIVERMORE STRUCTURE CONSOLE\n"
+    "<b>LIVERMORE STRUCTURE CONSOLE</b>\n\n"
+    "————————————————————————————————————————\n"
     "system status: online\n"
     "last snapshot: 11:55 UTC\n"
-    "coverage: futures / options / volatility\n\n"
-    "—\n\n"
+    "coverage: futures / options / volatility\n"
+    "————————————————————————————————————————\n\n"
     "Diagnostic console exposing structural market signals.\n\n"
-    "Observed layers\n"
+    "Observed layers:\n"
     "• Futures positioning (crowd risk, divergences)\n"
     "• Options volatility regime (BTC / ETH)\n"
     "• Multi-window snapshots: 12h / 6h / 1h\n"
@@ -1485,6 +1486,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
