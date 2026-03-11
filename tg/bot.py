@@ -124,19 +124,20 @@ def help_keyboard():
 
 
 INFO_TEXT = (
-    "This bot is a diagnostic console.\n\n"
-    "It exposes different layers of market state:\n\n"
-    "• Ticker layer (Futures)\n"
-    "  Crowd risk, activity and divergences per symbol\n\n"
-    "• Market context (BTC / ETH)\n"
-    "  Options structure and volatility regime\n\n"
-    "• Time windows\n"
-    "  12h / 6h / 1h snapshots\n\n"
-    "• Persistence\n"
-    "  How long the current market regime has been active\n\n"
-    "The bot does not generate signals\n"
-    "and does not suggest actions.\n\n"
-    "Interpretation is intentionally external.\n\n"
+    "LIVERMORE STRUCTURE CONSOLE\n"
+    "system status: online\n"
+    "last snapshot: 11:55 UTC\n"
+    "coverage: futures / options / volatility\n\n"
+    "—\n\n"
+    "Diagnostic console exposing structural market signals.\n\n"
+    "Observed layers\n"
+    "• Futures positioning (crowd risk, divergences)\n"
+    "• Options volatility regime (BTC / ETH)\n"
+    "• Multi-window snapshots: 12h / 6h / 1h\n"
+    "• Regime persistence\n\n"
+    "Output:\n"
+    "Structure diagnostics only.\n"
+    "No trading signals.\n\n"
     "Docs:\n"
     "https://www.notion.so/Livermore-Market-Structure-Monitoring-System-31e600b586bc80acb2cecdfdf1f413df"
 )
@@ -662,13 +663,18 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         INFO_TEXT,
         reply_markup=section_nav_keyboard(context),
-        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
     )
 
 
 async def information(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_action(context, "information")
-    await safe_reply(update, INFO_TEXT, reply_markup=section_nav_keyboard(context), parse_mode=ParseMode.HTML)
+        await safe_reply(
+        update,
+        INFO_TEXT,
+        reply_markup=section_nav_keyboard(context),
+        disable_web_page_preview=True,
+    )
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1443,6 +1449,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
