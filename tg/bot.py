@@ -143,9 +143,8 @@ INFO_TEXT = (
     Structure diagnostics only.
     No trading signals.
     
-    Docs:
-    https://livermore-notion-link
-    '<a href="https://www.notion.so/Livermore-Market-Structure-Monitoring-System-31e600b586bc80acb2cecdfdf1f413df">More information</a>'
+    "Docs:\n"
+    "https://www.notion.so/Livermore-Market-Structure-Monitoring-System-31e600b586bc80acb2cecdfdf1f413df"
 )
 
 async def lock_menu(query, text="⏳ Loading…"):
@@ -1450,6 +1449,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
