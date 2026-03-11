@@ -13,6 +13,7 @@ from data.queries import (
     load_deribit,
     load_divergence,
     load_event,
+    load_latest_log_ts,
     load_okx_market_state,
     load_risk,
 )
@@ -123,25 +124,53 @@ def help_keyboard():
     return main_menu_keyboard()
 
 
-INFO_TEXT = (
-    "<b>LIVERMORE STRUCTURE CONSOLE</b>\n\n"
-    "————————————————————————————————————————\n"
-    "system status: online\n"
-    "last snapshot: 11:55 UTC\n"
-    "coverage: futures / options / volatility\n"
-    "————————————————————————————————————————\n\n"
-    "Diagnostic console exposing structural market signals.\n\n"
-    "Observed layers:\n"
-    "• Futures positioning (crowd risk, divergences)\n"
-    "• Options volatility regime (BTC / ETH)\n"
-    "• Multi-window snapshots: 12h / 6h / 1h\n"
-    "• Regime persistence\n\n"
-    "Output:\n"
-    "Structure diagnostics only.\n"
-    "No trading signals.\n\n"
-    "Docs:\n"
-    "https://www.notion.so/Livermore-Market-Structure-Monitoring-System-31e600b586bc80acb2cecdfdf1f413df"
-)
+def _format_last_snapshot_utc(ts_value) -> str:
+    if ts_value is None:
+        return "N/A"
+
+    if isinstance(ts_value, str):
+        try:
+            dt = datetime.fromisoformat(ts_value.replace("Z", "+00:00"))
+        except ValueError:
+            return "N/A"
+    elif isinstance(ts_value, (int, float)):
+        ts_value = int(ts_value)
+        if ts_value < 10_000_000_000:
+            ts_value *= 1000
+        dt = datetime.fromtimestamp(ts_value / 1000, tz=timezone.utc)
+    else:
+        return "N/A"
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+
+    return dt.strftime("%H:%M UTC")
+
+
+async def build_info_text(update: Update) -> str:
+    latest_ts = await run_data_task(update, "latest log ts", load_latest_log_ts)
+    last_snapshot = _format_last_snapshot_utc(latest_ts)
+
+    return (
+        "<b>LIVERMORE STRUCTURE CONSOLE</b>\n"
+        "system status: online\n"
+        f"last snapshot: {last_snapshot}\n"
+        "coverage: futures / options / volatility\n\n"
+        "—\n\n"
+        "Diagnostic console exposing structural market signals.\n\n"
+        "Observed layers\n"
+        "• Futures positioning (crowd risk, divergences)\n"
+        "• Options volatility regime (BTC / ETH)\n"
+        "• Multi-window snapshots: 12h / 6h / 1h\n"
+        "• Regime persistence\n\n"
+        "Output:\n"
+        "Structure diagnostics only.\n"
+        "No trading signals.\n\n"
+        "Docs:\n"
+        "https://www.notion.so/Livermore-Market-Structure-Monitoring-System-31e600b586bc80acb2cecdfdf1f413df"
+    )
 
 async def lock_menu(query, text="⏳ Loading…"):
     """
@@ -696,21 +725,23 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     remember_last_action(context, "information")
+    text = await build_info_text(update)
 
     await update.message.reply_text(
-        INFO_TEXT,
+        text,
         reply_markup=section_nav_keyboard(context),
-        disable_web_page_preview=True,
+        parse_mode=ParseMode.HTML,
     )
 
 
 async def information(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_action(context, "information")
+    text = await build_info_text(update)
     await safe_reply(
         update,
-        INFO_TEXT,
+        text,
         reply_markup=section_nav_keyboard(context),
-        disable_web_page_preview=True,
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -1486,6 +1517,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
