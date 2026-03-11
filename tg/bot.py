@@ -124,19 +124,27 @@ def help_keyboard():
 
 
 INFO_TEXT = (
-    "This bot is a diagnostic console.\n\n"
-    "It exposes different layers of market state:\n\n"
-    "• Ticker layer (Futures)\n"
-    "  Crowd risk, activity and divergences per symbol\n\n"
-    "• Market context (BTC / ETH)\n"
-    "  Options structure and volatility regime\n\n"
-    "• Time windows\n"
-    "  12h / 6h / 1h snapshots\n\n"
-    "• Persistence\n"
-    "  How long the current market regime has been active\n\n"
-    "The bot does not generate signals\n"
-    "and does not suggest actions.\n\n"
-    "Interpretation is intentionally external.\n\n"
+    LIVERMORE STRUCTURE CONSOLE
+    system status: online
+    data latency: <5m
+    coverage: futures / options / volatility
+    
+    ——————————————————————————————————————————————————————
+    
+    Diagnostic console exposing structural market signals.
+    
+    Observed layers
+    • Futures positioning (crowd risk, divergences)
+    • Options volatility regime (BTC / ETH)
+    • Multi-window snapshots: 12h / 6h / 1h
+    • Regime persistence
+    
+    Output:
+    Structure diagnostics only.
+    No trading signals.
+    
+    Docs:
+    https://livermore-notion-link
     '<a href="https://www.notion.so/Livermore-Market-Structure-Monitoring-System-31e600b586bc80acb2cecdfdf1f413df">More information</a>'
 )
 
@@ -1442,6 +1450,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
