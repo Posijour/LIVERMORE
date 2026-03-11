@@ -670,11 +670,11 @@ async def info_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def information(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_action(context, "information")
         await safe_reply(
-        update,
-        INFO_TEXT,
-        reply_markup=section_nav_keyboard(context),
-        disable_web_page_preview=True,
-    )
+            update,
+            INFO_TEXT,
+            reply_markup=section_nav_keyboard(context),
+            disable_web_page_preview=True,
+        )
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1449,6 +1449,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
