@@ -263,3 +263,21 @@ class SupabaseClient:
 
         rows = self._filter_by_symbol(rows, symbol)
         return [self._extract_row_payload(r) for r in rows]
+
+    def fetch_latest_log_ts(self) -> int | None:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            raise RuntimeError("Supabase credentials not set")
+
+        page, _ = self._request_page_generic(
+            "logs",
+            [
+                ("select", "ts"),
+                ("order", "ts.desc"),
+                ("limit", "1"),
+            ],
+        )
+
+        if not page:
+            return None
+
+        return self._row_ts_ms(page[0])
