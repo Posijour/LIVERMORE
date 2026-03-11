@@ -154,11 +154,12 @@ async def build_info_text(update: Update) -> str:
     last_snapshot = _format_last_snapshot_utc(latest_ts)
 
     return (
-        "<b>LIVERMORE STRUCTURE CONSOLE</b>\n"
+        "<b>LIVERMORE STRUCTURE CONSOLE</b>\n\n"
+        "——————————\n"
         "system status: online\n"
         f"last snapshot: {last_snapshot}\n"
         "coverage: futures / options / volatility\n\n"
-        "—\n\n"
+        "——————————\n\n"
         "Diagnostic console exposing structural market signals.\n\n"
         "Observed layers\n"
         "• Futures positioning (crowd risk, divergences)\n"
@@ -169,7 +170,7 @@ async def build_info_text(update: Update) -> str:
         "Structure diagnostics only.\n"
         "No trading signals.\n\n"
         "Docs:\n"
-        "https://www.notion.so/Livermore-Market-Structure-Monitoring-System-31e600b586bc80acb2cecdfdf1f413df"
+        "<code>https://www.notion.so/Livermore-Market-Structure-Monitoring-System-31e600b586bc80acb2cecdfdf1f413df</code>"
     )
 
 async def lock_menu(query, text="⏳ Loading…"):
@@ -1517,6 +1518,7 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
 
