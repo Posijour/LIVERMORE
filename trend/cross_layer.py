@@ -431,6 +431,8 @@ def classify_window_event_cross(
         {
             "window_start_ts_ms": window_start_ts_ms,
             "window_end_ts_ms": window_end_ts_ms,
+            "risk": risk_max,
+            "risk_bucket": compute_risk_bucket(risk_max),
             "risk_avg": risk_avg,
             "risk_max": risk_max,
             "count_risk_ge_3": count_risk_ge_3,
@@ -520,7 +522,7 @@ def persist_cross_layer_event(result: dict) -> None:
 
 def process_alert_event_cross_layer(lookback_minutes: int = 180) -> dict[str, int]:
     now_ms = int(time.time() * 1000)
-    ts_from = now_ms - (lookback_minutes * 60 * 1000)
+    ts_from = now_ms - (lookback_minutes * 5 * 1000)
     alert_rows = load_event("alert_sent", ts_from, now_ms)
 
     counters = {
@@ -609,3 +611,4 @@ def process_window_30m_cross_layer(window_start_ts_ms: int, window_end_ts_ms: in
 def process_latest_window_30m_cross_layer(lag_minutes: int = WINDOW_JOB_LAG_MINUTES) -> dict[str, int]:
     window_start_ts_ms, window_end_ts_ms = get_last_completed_window_30m(lag_minutes=lag_minutes)
     return process_window_30m_cross_layer(window_start_ts_ms, window_end_ts_ms)
+
