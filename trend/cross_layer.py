@@ -363,7 +363,7 @@ def classify_alert_event_cross(alert_row: dict, context: CrossContext) -> dict:
     return result
 
 
-def _aggregate_window_risk_by_symbol(rows: list[dict]) -> dict[str, dict]:
+def _aggregate_window_risk_by_symbol(rows: list[dict]) -> dict[str, dict]:␊
     acc: dict[str, dict] = {}
 
     for row in rows:
@@ -373,6 +373,7 @@ def _aggregate_window_risk_by_symbol(rows: list[dict]) -> dict[str, dict]:
         if not symbol or risk_value is None:
             continue
 
+        row_ts_ms = get_event_ts_ms(row)
         bucket = acc.setdefault(
             str(symbol),
             {
@@ -380,12 +381,26 @@ def _aggregate_window_risk_by_symbol(rows: list[dict]) -> dict[str, dict]:
                 "risk_sum": 0.0,
                 "risk_max": None,
                 "count_risk_ge_3": 0,
+                "anchor_ts_ms": None,
+                "anchor_price": None,
+                "anchor_direction": None,
             },
         )
 
         bucket["count"] += 1
         bucket["risk_sum"] += risk_value
-        bucket["risk_max"] = risk_value if bucket["risk_max"] is None else max(bucket["risk_max"], risk_value)
+        if bucket["risk_max"] is None or risk_value > bucket["risk_max"]:
+            bucket["risk_max"] = risk_value
+            bucket["anchor_ts_ms"] = row_ts_ms
+            bucket["anchor_price"] = data.get("price")
+            bucket["anchor_direction"] = data.get("direction")
+        elif bucket["risk_max"] == risk_value and row_ts_ms is not None:
+            anchor_ts_ms = _to_int_ms(bucket["anchor_ts_ms"])
+            if anchor_ts_ms is None or row_ts_ms > anchor_ts_ms:
+                bucket["anchor_ts_ms"] = row_ts_ms
+                bucket["anchor_price"] = data.get("price")
+                bucket["anchor_direction"] = data.get("direction")
+
         if risk_value >= 3:
             bucket["count_risk_ge_3"] += 1
 
@@ -405,6 +420,9 @@ def _aggregate_window_risk_by_symbol(rows: list[dict]) -> dict[str, dict]:
                 or (risk_max is not None and risk_max >= WINDOW_RISK_MAX_THRESHOLD)
                 or (count_risk_ge_3 >= WINDOW_RISK_COUNT_THRESHOLD)
             ),
+            "source_event_ts_ms": _to_int_ms(bucket["anchor_ts_ms"]),
+            "price": bucket["anchor_price"],
+            "direction": bucket["anchor_direction"],
         }
 
     return aggregated
@@ -418,6 +436,9 @@ def classify_window_event_cross(
     risk_avg: float | None,
     risk_max: float | None,
     count_risk_ge_3: int,
+    source_event_ts_ms: int | None,
+    price,
+    direction,
     context: CrossContext,
 ) -> dict:
     result = _build_base_cross_result(
@@ -432,6 +453,9 @@ def classify_window_event_cross(
         {
             "window_start_ts_ms": window_start_ts_ms,
             "window_end_ts_ms": window_end_ts_ms,
+            "source_event_ts_ms": source_event_ts_ms,
+            "price": price,
+            "direction": direction,
             "risk": risk_max,
             "risk_bucket": compute_risk_bucket(risk_max),
             "risk_avg": risk_avg,
@@ -646,6 +670,9 @@ def process_window_30m_cross_layer(window_start_ts_ms: int, window_end_ts_ms: in
                 risk_avg=stats["risk_avg"],
                 risk_max=stats["risk_max"],
                 count_risk_ge_3=stats["count_risk_ge_3"],
+                source_event_ts_ms=stats["source_event_ts_ms"],
+                price=stats["price"],
+                direction=stats["direction"],
                 context=context,
             )
             persist_cross_layer_event(result)
@@ -664,5 +691,6 @@ def process_window_30m_cross_layer(window_start_ts_ms: int, window_end_ts_ms: in
 def process_latest_window_30m_cross_layer(lag_minutes: int = WINDOW_JOB_LAG_MINUTES) -> dict[str, int]:
     window_start_ts_ms, window_end_ts_ms = get_last_completed_window_30m(lag_minutes=lag_minutes)
     return process_window_30m_cross_layer(window_start_ts_ms, window_end_ts_ms)
+
 
 
