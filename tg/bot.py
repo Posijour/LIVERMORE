@@ -6,7 +6,10 @@ import time
 from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
-from trend.cross_layer import process_cross_layer_events
+from trend.cross_layer import (
+    process_alert_event_cross_layer,
+    process_latest_window_30m_cross_layer,
+)
 from trend.market_structure import compute_market_structure
 from time_utils import parse_window
 from data.queries import (
@@ -1315,21 +1318,34 @@ async def divergence_watcher_job(context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Watcher error")
 
 
-async def cross_layer_watcher():
-    counters = await asyncio.to_thread(process_cross_layer_events)
+async def cross_layer_alert_event_watcher():
+    counters = await asyncio.to_thread(process_alert_event_cross_layer)
     if counters.get("errors", 0):
-        logger.warning("Cross-layer watcher completed with errors: %s", counters)
+        logger.warning("Cross-layer ALERT_EVENT watcher completed with errors: %s", counters)
     else:
-        logger.info("Cross-layer watcher completed: %s", counters)
+        logger.info("Cross-layer ALERT_EVENT watcher completed: %s", counters)
 
 
-async def cross_layer_watcher_job(context: ContextTypes.DEFAULT_TYPE):
+async def cross_layer_alert_event_watcher_job(context: ContextTypes.DEFAULT_TYPE):
     try:
-        await cross_layer_watcher()
+        await cross_layer_alert_event_watcher()
     except RuntimeError as exc:
-        logger.warning("Cross-layer watcher data/persistence error: %s", exc)
+        logger.warning("Cross-layer ALERT_EVENT watcher data/persistence error: %s", exc)
     except Exception:
-        logger.exception("Cross-layer watcher error")
+        logger.exception("Cross-layer ALERT_EVENT watcher error")
+
+
+async def cross_layer_window_30m_job(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        counters = await asyncio.to_thread(process_latest_window_30m_cross_layer)
+        if counters.get("errors", 0):
+            logger.warning("Cross-layer WINDOW_30M job completed with errors: %s", counters)
+        else:
+            logger.info("Cross-layer WINDOW_30M job completed: %s", counters)
+    except RuntimeError as exc:
+        logger.warning("Cross-layer WINDOW_30M job data/persistence error: %s", exc)
+    except Exception:
+        logger.exception("Cross-layer WINDOW_30M job error")
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -1521,9 +1537,14 @@ def run_bot():
             first=10,
         )
         app.job_queue.run_repeating(
-            cross_layer_watcher_job,
+            cross_layer_alert_event_watcher_job,
             interval=120,
             first=20,
+        )
+        app.job_queue.run_repeating(
+            cross_layer_window_30m_job,
+            interval=1800,
+            first=60,
         )
 
         print("Telegram bot running...", flush=True)
@@ -1541,4 +1562,5 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
