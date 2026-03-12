@@ -363,7 +363,7 @@ def classify_alert_event_cross(alert_row: dict, context: CrossContext) -> dict:
     return result
 
 
-def _aggregate_window_risk_by_symbol(rows: list[dict]) -> dict[str, dict]:␊
+def _aggregate_window_risk_by_symbol(rows: list[dict]) -> dict[str, dict]:
     acc: dict[str, dict] = {}
 
     for row in rows:
@@ -691,6 +691,7 @@ def process_window_30m_cross_layer(window_start_ts_ms: int, window_end_ts_ms: in
 def process_latest_window_30m_cross_layer(lag_minutes: int = WINDOW_JOB_LAG_MINUTES) -> dict[str, int]:
     window_start_ts_ms, window_end_ts_ms = get_last_completed_window_30m(lag_minutes=lag_minutes)
     return process_window_30m_cross_layer(window_start_ts_ms, window_end_ts_ms)
+
 
 
 
