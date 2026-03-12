@@ -199,6 +199,7 @@ def classify_cross_event(risk_row: dict, context: CrossContext) -> dict:
     risk_value = _risk_value(risk_row)
 
     result = {
+        "ts_unix_ms": event_ts_ms,
         "event_key": f"{symbol}:{event_ts_ms}:{risk_value}:cross_v1",
         "symbol": symbol,
         "source_event_ts_ms": event_ts_ms,
@@ -336,3 +337,4 @@ def process_cross_layer_events(lookback_minutes: int = 180) -> dict[str, int]:
             )
 
     return counters
+
