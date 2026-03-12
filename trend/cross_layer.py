@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from json import dumps
+from json import dumps, loads
 import logging
 import socket
 import time
@@ -204,6 +204,7 @@ def classify_cross_event(risk_row: dict, context: CrossContext) -> dict:
         "symbol": symbol,
         "source_event_ts_ms": event_ts_ms,
         "risk": risk_value,
+        "risk_bucket": compute_risk_bucket(risk_value),
         "price": risk_data.get("price"),
         "direction": risk_data.get("direction"),
         "risk_driver": risk_data.get("risk_driver"),
@@ -277,6 +278,91 @@ def _build_cross_layer_request(payload: dict) -> Request:
     return Request(url, headers=headers, method="POST", data=body)
 
 
+def compute_risk_bucket(risk: float | int | None) -> str | None:
+    if risk is None:
+        return None
+
+    value = float(risk)
+    if value >= 5:
+        return "5+"
+    if value >= 4:
+        return "4"
+    return "3"
+
+
+def _field_value(row: dict, key: str):
+    if key in row:
+        return row.get(key)
+
+    data = row.get("data")
+    if isinstance(data, dict):
+        return data.get(key)
+
+    return None
+
+
+def build_state_signature(row: dict) -> tuple:
+    risk_bucket = _field_value(row, "risk_bucket")
+    if risk_bucket is None:
+        risk_bucket = compute_risk_bucket(_field_value(row, "risk"))
+
+    return (
+        _field_value(row, "context_status"),
+        _field_value(row, "cross_type"),
+        _field_value(row, "market_mode"),
+        _field_value(row, "bybit_regime"),
+        risk_bucket,
+    )
+
+
+def load_last_cross_layer_event(symbol: str) -> dict | None:
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise RuntimeError("Supabase credentials not set")
+
+    query = urlencode(
+        [
+            ("symbol", f"eq.{symbol}"),
+            ("order", "ts_unix_ms.desc"),
+            ("limit", "1"),
+        ]
+    )
+    url = f"{SUPABASE_URL}/rest/v1/cross_layer_events?{query}"
+    req = Request(
+        url,
+        headers={
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Prefer": "count=exact",
+        },
+        method="GET",
+    )
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            with urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                payload = loads(response.read().decode("utf-8"))
+                if not payload:
+                    return None
+                return payload[0]
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+            raise RuntimeError(f"cross_layer_events read HTTP error {exc.code}: {detail}") from exc
+        except (TimeoutError, socket.timeout, URLError) as exc:
+            if attempt == MAX_RETRIES:
+                reason = getattr(exc, "reason", exc)
+                raise RuntimeError(f"cross_layer_events read connection error: {reason}") from exc
+            time.sleep(RETRY_BACKOFF_SECONDS * attempt)
+
+    raise RuntimeError("cross_layer_events read connection error: exhausted retries")
+
+
+def should_persist_cross_layer_event(candidate: dict, last_row: dict | None) -> bool:
+    if last_row is None:
+        return True
+
+    return build_state_signature(candidate) != build_state_signature(last_row)
+
+
 def persist_cross_layer_event(result: dict) -> None:
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise RuntimeError("Supabase credentials not set")
@@ -327,6 +413,28 @@ def process_cross_layer_events(lookback_minutes: int = 180) -> dict[str, int]:
 
             context = get_latest_cross_context_for_event(event_ts_ms)
             result = classify_cross_event(risk_row, context)
+
+            symbol = result.get("symbol")
+            if symbol:
+                try:
+                    last_row = load_last_cross_layer_event(str(symbol))
+                except Exception:
+                    logger.exception(
+                        "failed to load last cross-layer event, skip persist: symbol=%s",
+                        symbol,
+                    )
+                    continue
+            else:
+                last_row = None
+
+            if not should_persist_cross_layer_event(result, last_row):
+                logger.info(
+                    "cross-layer state unchanged, skip persist: symbol=%s state=%s",
+                    symbol,
+                    build_state_signature(result),
+                )
+                continue
+
             persist_cross_layer_event(result)
             counters["processed"] += 1
         except Exception:
@@ -337,4 +445,5 @@ def process_cross_layer_events(lookback_minutes: int = 180) -> dict[str, int]:
             )
 
     return counters
+
 
