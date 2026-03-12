@@ -1538,7 +1538,7 @@ def run_bot():
         )
         app.job_queue.run_repeating(
             cross_layer_alert_event_watcher_job,
-            interval=120,
+            interval=300,
             first=20,
         )
         app.job_queue.run_repeating(
@@ -1562,5 +1562,6 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
 
 
