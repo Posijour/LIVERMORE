@@ -27,6 +27,7 @@ WINDOW_JOB_LAG_MINUTES = 2
 WINDOW_RISK_AVG_THRESHOLD = 2.5
 WINDOW_RISK_MAX_THRESHOLD = 4.0
 WINDOW_RISK_COUNT_THRESHOLD = 3
+ALERT_EVENT_COOLDOWN_MINUTES = 30
 
 SOURCE_MODE_ALERT_EVENT = "ALERT_EVENT"
 SOURCE_MODE_WINDOW_30M = "WINDOW_30M"
@@ -498,6 +499,54 @@ def has_window_30m_been_processed(window_end_ts_ms: int) -> bool:
     return bool(rows)
 
 
+def get_latest_alert_event_for_symbol(symbol: str) -> dict | None:
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise RuntimeError("Supabase credentials not set")
+
+    query = urlencode(
+        [
+            ("source_mode", f"eq.{SOURCE_MODE_ALERT_EVENT}"),
+            ("symbol", f"eq.{symbol}"),
+            ("order", "ts_unix_ms.desc"),
+            ("limit", "1"),
+        ]
+    )
+    url = f"{SUPABASE_URL}/rest/v1/cross_layer_events?{query}"
+    req = Request(
+        url,
+        headers={
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+        },
+        method="GET",
+    )
+    rows = _request_json(req)
+    return rows[0] if rows else None
+
+
+def should_persist_alert_event(result: dict) -> bool:
+    symbol = result.get("symbol")
+    event_ts_ms = _to_int_ms(result.get("ts_unix_ms"))
+    if not symbol or event_ts_ms is None:
+        return True
+
+    latest = get_latest_alert_event_for_symbol(str(symbol))
+    if latest is None:
+        return True
+
+    latest_ts_ms = _to_int_ms(latest.get("ts_unix_ms"))
+    if latest_ts_ms is None:
+        return True
+
+    cooldown_ms = ALERT_EVENT_COOLDOWN_MINUTES * 60 * 1000
+    if event_ts_ms - latest_ts_ms >= cooldown_ms:
+        return True
+
+    state_fields = ("context_status", "cross_type", "market_mode", "bybit_regime")
+    state_changed = any(result.get(field) != latest.get(field) for field in state_fields)
+    return state_changed
+
+
 def persist_cross_layer_event(result: dict) -> None:
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise RuntimeError("Supabase credentials not set")
@@ -528,6 +577,7 @@ def process_alert_event_cross_layer(lookback_minutes: int = 180) -> dict[str, in
     counters = {
         "total_alert_rows": 0,
         "processed": 0,
+        "skipped_cooldown": 0,
         "errors": 0,
     }
 
@@ -541,6 +591,9 @@ def process_alert_event_cross_layer(lookback_minutes: int = 180) -> dict[str, in
 
             context = get_latest_cross_context_for_event(event_ts_ms)
             result = classify_alert_event_cross(alert_row, context)
+            if not should_persist_alert_event(result):
+                counters["skipped_cooldown"] += 1
+                continue
             persist_cross_layer_event(result)
             counters["processed"] += 1
         except Exception:
@@ -611,4 +664,5 @@ def process_window_30m_cross_layer(window_start_ts_ms: int, window_end_ts_ms: in
 def process_latest_window_30m_cross_layer(lag_minutes: int = WINDOW_JOB_LAG_MINUTES) -> dict[str, int]:
     window_start_ts_ms, window_end_ts_ms = get_last_completed_window_30m(lag_minutes=lag_minutes)
     return process_window_30m_cross_layer(window_start_ts_ms, window_end_ts_ms)
+
 
