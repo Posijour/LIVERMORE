@@ -25,9 +25,10 @@ WINDOW_MS = 30 * 60 * 1000
 WINDOW_JOB_LAG_MINUTES = 2
 
 WINDOW_RISK_AVG_THRESHOLD = 2.5
-WINDOW_RISK_MAX_THRESHOLD = 4.0
 WINDOW_RISK_COUNT_THRESHOLD = 3
+WINDOW_RISK_GE_4_THRESHOLD = 2
 ALERT_EVENT_COOLDOWN_MINUTES = 30
+ALERT_EVENT_LOOKBACK_MINUTES = 5
 
 SOURCE_MODE_ALERT_EVENT = "ALERT_EVENT"
 SOURCE_MODE_WINDOW_30M = "WINDOW_30M"
@@ -381,6 +382,7 @@ def _aggregate_window_risk_by_symbol(rows: list[dict]) -> dict[str, dict]:
                 "risk_sum": 0.0,
                 "risk_max": None,
                 "count_risk_ge_3": 0,
+                "count_risk_ge_4": 0,
                 "anchor_ts_ms": None,
                 "anchor_price": None,
                 "anchor_direction": None,
@@ -403,6 +405,8 @@ def _aggregate_window_risk_by_symbol(rows: list[dict]) -> dict[str, dict]:
 
         if risk_value >= 3:
             bucket["count_risk_ge_3"] += 1
+        if risk_value >= 4:
+            bucket["count_risk_ge_4"] += 1
 
     aggregated: dict[str, dict] = {}
     for symbol, bucket in acc.items():
@@ -410,15 +414,17 @@ def _aggregate_window_risk_by_symbol(rows: list[dict]) -> dict[str, dict]:
         risk_avg = bucket["risk_sum"] / count if count else None
         risk_max = bucket["risk_max"]
         count_risk_ge_3 = bucket["count_risk_ge_3"]
+        count_risk_ge_4 = bucket["count_risk_ge_4"]
 
         aggregated[symbol] = {
             "risk_avg": risk_avg,
             "risk_max": risk_max,
             "count_risk_ge_3": count_risk_ge_3,
+            "count_risk_ge_4": count_risk_ge_4,
             "qualifies": (
                 (risk_avg is not None and risk_avg >= WINDOW_RISK_AVG_THRESHOLD)
-                or (risk_max is not None and risk_max >= WINDOW_RISK_MAX_THRESHOLD)
                 or (count_risk_ge_3 >= WINDOW_RISK_COUNT_THRESHOLD)
+                or (count_risk_ge_4 >= WINDOW_RISK_GE_4_THRESHOLD)
             ),
             "source_event_ts_ms": _to_int_ms(bucket["anchor_ts_ms"]),
             "price": bucket["anchor_price"],
@@ -436,6 +442,7 @@ def classify_window_event_cross(
     risk_avg: float | None,
     risk_max: float | None,
     count_risk_ge_3: int,
+    count_risk_ge_4: int,
     source_event_ts_ms: int | None,
     price,
     direction,
@@ -461,6 +468,7 @@ def classify_window_event_cross(
             "risk_avg": risk_avg,
             "risk_max": risk_max,
             "count_risk_ge_3": count_risk_ge_3,
+            "count_risk_ge_4": count_risk_ge_4,
         }
     )
     return result
@@ -593,9 +601,9 @@ def persist_cross_layer_event(result: dict) -> None:
     raise RuntimeError("cross_layer_events connection error: exhausted retries")
 
 
-def process_alert_event_cross_layer(lookback_minutes: int = 180) -> dict[str, int]:
-    now_ms = int(time.time() * 1000)
-    ts_from = now_ms - (lookback_minutes * 5 * 1000)
+def process_alert_event_cross_layer(lookback_minutes: int = ALERT_EVENT_LOOKBACK_MINUTES) -> dict[str, int]:
+    now_ms = int(time.time() * 1000)␊
+    ts_from = now_ms - (lookback_minutes * 60 * 1000)
     alert_rows = load_event("alert_sent", ts_from, now_ms)
 
     counters = {
@@ -670,6 +678,7 @@ def process_window_30m_cross_layer(window_start_ts_ms: int, window_end_ts_ms: in
                 risk_avg=stats["risk_avg"],
                 risk_max=stats["risk_max"],
                 count_risk_ge_3=stats["count_risk_ge_3"],
+                count_risk_ge_4=stats["count_risk_ge_4"],
                 source_event_ts_ms=stats["source_event_ts_ms"],
                 price=stats["price"],
                 direction=stats["direction"],
@@ -691,6 +700,7 @@ def process_window_30m_cross_layer(window_start_ts_ms: int, window_end_ts_ms: in
 def process_latest_window_30m_cross_layer(lag_minutes: int = WINDOW_JOB_LAG_MINUTES) -> dict[str, int]:
     window_start_ts_ms, window_end_ts_ms = get_last_completed_window_30m(lag_minutes=lag_minutes)
     return process_window_30m_cross_layer(window_start_ts_ms, window_end_ts_ms)
+
 
 
 
