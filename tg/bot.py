@@ -6,6 +6,7 @@ import time
 from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
+from trend.cross_layer import process_cross_layer_events
 from trend.market_structure import compute_market_structure
 from time_utils import parse_window
 from data.queries import (
@@ -1314,6 +1315,23 @@ async def divergence_watcher_job(context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Watcher error")
 
 
+async def cross_layer_watcher():
+    counters = await asyncio.to_thread(process_cross_layer_events)
+    if counters.get("errors", 0):
+        logger.warning("Cross-layer watcher completed with errors: %s", counters)
+    else:
+        logger.info("Cross-layer watcher completed: %s", counters)
+
+
+async def cross_layer_watcher_job(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await cross_layer_watcher()
+    except RuntimeError as exc:
+        logger.warning("Cross-layer watcher data/persistence error: %s", exc)
+    except Exception:
+        logger.exception("Cross-layer watcher error")
+
+
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.exception("Telegram update handling failed", exc_info=context.error)
 
@@ -1502,6 +1520,11 @@ def run_bot():
             interval=120,
             first=10,
         )
+        app.job_queue.run_repeating(
+            cross_layer_watcher_job,
+            interval=120,
+            first=20,
+        )
 
         print("Telegram bot running...", flush=True)
 
@@ -1518,3 +1541,4 @@ def run_bot():
             logger.warning("Polling stopped. Restarting in 5 seconds...")
             print("Telegram bot polling stopped.", flush=True)
             time.sleep(5)
+
