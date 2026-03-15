@@ -925,6 +925,8 @@ def run_bot(
     initial_backoff_seconds: float = 3.0,
     max_backoff_seconds: float = 30.0,
 ):
+    backoff_seconds = initial_backoff_seconds
+
     async def _run_bot_async() -> None:
         nonlocal backoff_seconds
 
@@ -971,7 +973,7 @@ def run_bot(
                 if on_status:
                     on_status("stopped", None)
                 break
-        except (TimedOut, NetworkError) as exc:
+            except (TimedOut, NetworkError) as exc:
                 logger.warning("Polling interrupted due to network issue: %s", exc)
                 if on_status:
                     on_status("restarting", str(exc))
@@ -997,18 +999,18 @@ def run_bot(
                 if stop_event is not None and stop_event.is_set():
                     logger.info("Polling stopped due to shutdown")
                     print("Telegram bot polling stopped.", flush=True)
-                    await asyncio.sleep(backoff_seconds)
-                    backoff_seconds = min(backoff_seconds * 2, max_backoff_seconds)
+                    break
 
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        )
-    
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("apscheduler").setLevel(logging.WARNING)
-        logger.info("Starting Telegram bot process")
-    
-        backoff_seconds = initial_backoff_seconds
-    
-        asyncio.run(_run_bot_async())
+                await asyncio.sleep(backoff_seconds)
+                backoff_seconds = min(backoff_seconds * 2, max_backoff_seconds)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
+    logger.info("Starting Telegram bot process")
+
+    asyncio.run(_run_bot_async())
