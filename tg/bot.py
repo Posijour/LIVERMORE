@@ -640,7 +640,7 @@ async def dispersion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if ms:
         text += "\n\n=== MARKET STRUCTURE ===\n\n"
         text += f"Coherence: {ms.get('coherence_label')} ({_fmt_number(ms.get('coherence'), 2)})\n"
-        text += f"Compression: {ms.get('compression_label')} ({_fmt_number(ms.get('compression_score'), 0)})\n"
+        text += f"Compression: {ms.get('compression_label')} ({_fmt_number(ms.get('compression_score'), 2)})\n"
         text += f"Driver: {_fmt_text(ms.get('driver'))}\n"
         text += f"Regime: {_fmt_text(ms.get('regime'))}"
 
