@@ -726,6 +726,9 @@ async def divergence_watcher(app):
 async def divergence_watcher_job(context: ContextTypes.DEFAULT_TYPE):
     try:
         await divergence_watcher(context.application)
+        on_successful_work = context.application.bot_data.get("on_successful_work")
+        if callable(on_successful_work):
+            on_successful_work()
     except TimedOut:
         logger.warning("Watcher send timeout; will retry on next cycle")
     except NetworkError as exc:
@@ -946,6 +949,7 @@ async def _shutdown_application(app, was_running: bool) -> None:
 def run_bot(
     stop_event=None,
     on_status: Optional[Callable[[str, Optional[str]], None]] = None,
+    on_successful_work: Optional[Callable[[], None]] = None,
     initial_backoff_seconds: float = 3.0,
     max_backoff_seconds: float = 30.0,
 ):
@@ -962,6 +966,7 @@ def run_bot(
                 break
 
             app = _build_application()
+            app.bot_data["on_successful_work"] = on_successful_work
             app_started = False
 
             try:
@@ -976,7 +981,6 @@ def run_bot(
                 await app.updater.start_polling(drop_pending_updates=False)
                 logger.info("Telegram polling started")
                 print("Telegram bot running...", flush=True)
-
                 if on_status:
                     on_status("running", None)
 
