@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
+from urllib.parse import urlsplit
 
 from data.queries import load_latest_log_ts
 from runtime_env import validate_required_env
@@ -113,24 +114,63 @@ class ServiceState:
             self.shutting_down = True
 
 
+def build_root_payload() -> dict:
+    return {
+        "status": "ok",
+        "service": SERVICE_NAME,
+    }
+
+
+def build_health_payload(state: ServiceState) -> dict:
+    health = state.to_health()
+    return {
+        "status": health["status"],
+        "service": health["service"],
+        "bot": health["bot_loop"]["status"],
+        "supabase": health["supabase"]["status"],
+        "uptime_sec": health["uptime_sec"],
+        "details": health,
+    }
+
+
+
+
 def create_handler(state: ServiceState):
     class HealthHandler(BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802
-            if self.path != "/health":
-                self.send_response(404)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"error":"not_found"}')
-                return
+        def _normalized_path(self) -> str:
+            return urlsplit(self.path).path
 
-            payload = state.to_health()
-            body = json.dumps(payload).encode("utf-8")
-
-            self.send_response(200 if state.is_healthy() else 503)
+        def _send_json(self, status_code: int, payload: dict, include_body: bool = True) -> None:
+            body = json.dumps(payload).encode("utf-8") if include_body else b""
+            self.send_response(status_code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            if include_body:
+                self.wfile.write(body)
+
+        def _handle_health(self, include_body: bool) -> None:
+            path = self._normalized_path()
+
+            if path == "/":
+                self._send_json(200, build_root_payload(), include_body=include_body)
+                logger.info("health-http served root endpoint")
+                return
+
+            if path == "/health":
+                payload = build_health_payload(state)
+                status_code = 200 if state.is_healthy() else 503
+                self._send_json(status_code, payload, include_body=include_body)
+                logger.info("health-http served /health status=%s", payload["status"])
+                return
+
+            self._send_json(404, {"error": "not_found"}, include_body=include_body)
+
+        def do_GET(self):  # noqa: N802
+            self._handle_health(include_body=True)
+
+        def do_HEAD(self):  # noqa: N802
+            self._handle_health(include_body=False)
 
         def log_message(self, fmt, *args):  # noqa: A003
             logger.info("health-http %s", fmt % args)
@@ -228,19 +268,21 @@ def main() -> int:
         stop_event.set()
         exit_code = 1
     finally:
-        logger.info("Shutdown sequence started")
+        logger.info("Graceful shutdown started")
         state.mark_shutting_down()
         stop_event.set()
 
         server.shutdown()
         server.server_close()
 
-        bot_thread.join(timeout=30)
+        bot_thread.join(timeout=45)
+        if bot_thread.is_alive():
+            logger.warning("Telegram bot thread did not stop before timeout")
         supabase_thread.join(timeout=10)
         heartbeat_thread.join(timeout=10)
         server_thread.join(timeout=10)
 
-        logger.info("Shutdown sequence completed")
+        logger.info("Shutdown completed")
 
     return exit_code
 
