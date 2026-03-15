@@ -16,20 +16,77 @@ from tg.bot import run_bot
 
 SERVICE_NAME = "livermore-core-bot"
 logger = logging.getLogger(__name__)
+DEFAULT_WORK_STALE_THRESHOLD_SEC = 300
+
+
+def _resolve_work_stale_threshold_sec() -> int:
+    raw = os.getenv("WORK_STALE_THRESHOLD_SEC", str(DEFAULT_WORK_STALE_THRESHOLD_SEC))
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid WORK_STALE_THRESHOLD_SEC=%r; using default=%s",
+            raw,
+            DEFAULT_WORK_STALE_THRESHOLD_SEC,
+        )
+        return DEFAULT_WORK_STALE_THRESHOLD_SEC
+
+    if value <= 0:
+        logger.warning(
+            "Non-positive WORK_STALE_THRESHOLD_SEC=%s; using default=%s",
+            value,
+            DEFAULT_WORK_STALE_THRESHOLD_SEC,
+        )
+        return DEFAULT_WORK_STALE_THRESHOLD_SEC
+
+    return value
 
 
 class ServiceState:
-    def __init__(self) -> None:
+    def __init__(self, work_stale_threshold_sec: int) -> None:
         self.started_at = datetime.now(timezone.utc)
         self._lock = threading.Lock()
+        self.work_stale_threshold_sec = work_stale_threshold_sec
         self.bot_loop_status = "starting"
         self.bot_last_error: Optional[str] = None
         self.supabase_status = "unknown"
         self.supabase_last_ok_at: Optional[str] = None
         self.supabase_last_error: Optional[str] = None
         self.supabase_last_probe_at: Optional[str] = None
+        self.last_successful_work_ts: Optional[datetime] = None
         self.fatal_error: Optional[str] = None
         self.shutting_down = False
+        self._last_logged_health_state: Optional[str] = None
+
+    def _derive_health_state(
+        self,
+        now: datetime,
+        bot_loop_status: str,
+        supabase_status: str,
+        shutting_down: bool,
+        fatal_error: Optional[str],
+        last_successful_work_ts: Optional[datetime],
+    ) -> tuple[str, Optional[int]]:
+        if fatal_error or shutting_down:
+            return "unhealthy", None
+        if bot_loop_status not in {"running", "starting", "restarting"}:
+            return "unhealthy", None
+        if supabase_status == "error":
+            return "unhealthy", None
+
+        if bot_loop_status in {"starting", "restarting"}:
+            return "healthy", None
+
+        age_sec = None
+        if last_successful_work_ts is None:
+            age_sec = int((now - self.started_at).total_seconds())
+        else:
+            age_sec = int((now - last_successful_work_ts).total_seconds())
+
+        if age_sec > self.work_stale_threshold_sec:
+            return "unhealthy", age_sec
+
+        return "healthy", age_sec
 
     def to_health(self) -> dict:
         now = datetime.now(timezone.utc)
@@ -41,16 +98,30 @@ class ServiceState:
             supabase_last_probe_at = self.supabase_last_probe_at
             supabase_last_ok_at = self.supabase_last_ok_at
             supabase_last_error = self.supabase_last_error
+            last_successful_work_ts = self.last_successful_work_ts
             shutting_down = self.shutting_down
             fatal_error = self.fatal_error
 
-        is_healthy = self._is_healthy_values(bot_loop_status, supabase_status, shutting_down, fatal_error)
+        health_status, work_age_sec = self._derive_health_state(
+            now,
+            bot_loop_status,
+            supabase_status,
+            shutting_down,
+            fatal_error,
+            last_successful_work_ts,
+        )
 
         return {
-            "status": "healthy" if is_healthy else "unhealthy",
+            "status": health_status,
             "service": SERVICE_NAME,
             "started_at": started_at.isoformat(),
             "uptime_sec": int((now - started_at).total_seconds()),
+            "last_successful_work_ts": (
+                last_successful_work_ts.isoformat().replace("+00:00", "Z")
+                if last_successful_work_ts is not None
+                else None
+            ),
+            "last_successful_work_age_sec": work_age_sec,
             "bot_loop": {
                 "status": bot_loop_status,
                 "last_error": bot_last_error,
@@ -66,23 +137,7 @@ class ServiceState:
         }
 
     def is_healthy(self) -> bool:
-        with self._lock:
-            return self._is_healthy_values(
-                self.bot_loop_status,
-                self.supabase_status,
-                self.shutting_down,
-                self.fatal_error,
-            )
-
-    @staticmethod
-    def _is_healthy_values(bot_loop_status: str, supabase_status: str, shutting_down: bool, fatal_error: Optional[str]) -> bool:
-        if fatal_error or shutting_down:
-            return False
-        if bot_loop_status not in {"running", "starting", "restarting"}:
-            return False
-        if supabase_status == "error":
-            return False
-        return True
+        return self.to_health()["status"] == "healthy"
 
     def set_bot_status(self, status: str, error: Optional[str]) -> None:
         with self._lock:
@@ -113,6 +168,34 @@ class ServiceState:
         with self._lock:
             self.shutting_down = True
 
+    def mark_successful_work(self) -> None:
+        with self._lock:
+            self.last_successful_work_ts = datetime.now(timezone.utc)
+
+    def log_health_state_transition(self) -> None:
+        health = self.to_health()
+        current_state = health["status"]
+        age_sec = health["last_successful_work_age_sec"]
+        bot_status = health["bot_loop"]["status"]
+
+        with self._lock:
+            previous_state = self._last_logged_health_state
+            if previous_state == current_state:
+                return
+            self._last_logged_health_state = current_state
+
+        if previous_state is None:
+            logger.info("Health state initialized: %s", current_state)
+            return
+
+        logger.warning(
+            "Health state changed: %s -> %s (bot=%s, stale_age_sec=%s)",
+            previous_state,
+            current_state,
+            bot_status,
+            age_sec,
+        )
+
 
 def build_root_payload() -> dict:
     return {
@@ -129,6 +212,8 @@ def build_health_payload(state: ServiceState) -> dict:
         "bot": health["bot_loop"]["status"],
         "supabase": health["supabase"]["status"],
         "uptime_sec": health["uptime_sec"],
+        "last_successful_work_ts": health["last_successful_work_ts"],
+        "last_successful_work_age_sec": health["last_successful_work_age_sec"],
         "details": health,
     }
 
@@ -192,19 +277,6 @@ def supabase_probe_loop(stop_event: threading.Event, state: ServiceState, interv
     logger.info("Supabase probe loop stopped")
 
 
-def heartbeat_loop(stop_event: threading.Event, state: ServiceState, interval_sec: int = 60) -> None:
-    while not stop_event.is_set():
-        health = state.to_health()
-        logger.info(
-            "Heartbeat: status=%s bot=%s supabase=%s uptime_sec=%s",
-            health["status"],
-            health["bot_loop"]["status"],
-            health["supabase"]["status"],
-            health["uptime_sec"],
-        )
-        stop_event.wait(interval_sec)
-
-
 def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -220,7 +292,9 @@ def main() -> int:
         return 1
 
     port = int(os.getenv("PORT", "10000"))
-    state = ServiceState()
+    work_stale_threshold_sec = _resolve_work_stale_threshold_sec()
+    state = ServiceState(work_stale_threshold_sec=work_stale_threshold_sec)
+    logger.info("Work freshness threshold configured: %ss", work_stale_threshold_sec)
     stop_event = threading.Event()
 
     def handle_signal(signum, _frame):
@@ -239,12 +313,13 @@ def main() -> int:
     supabase_thread = threading.Thread(target=supabase_probe_loop, args=(stop_event, state), daemon=True)
     supabase_thread.start()
 
-    heartbeat_thread = threading.Thread(target=heartbeat_loop, args=(stop_event, state), daemon=True)
-    heartbeat_thread.start()
-
     bot_thread = threading.Thread(
         target=run_bot,
-        kwargs={"stop_event": stop_event, "on_status": state.set_bot_status},
+        kwargs={
+            "stop_event": stop_event,
+            "on_status": state.set_bot_status,
+            "on_successful_work": state.mark_successful_work,
+        },
         daemon=True,
     )
     bot_thread.start()
@@ -255,6 +330,7 @@ def main() -> int:
 
     try:
         while not stop_event.is_set():
+            state.log_health_state_transition()
             if not bot_thread.is_alive():
                 state.set_fatal("bot loop thread stopped unexpectedly")
                 logger.error("Bot loop thread died unexpectedly")
@@ -279,7 +355,6 @@ def main() -> int:
         if bot_thread.is_alive():
             logger.warning("Telegram bot thread did not stop before timeout")
         supabase_thread.join(timeout=10)
-        heartbeat_thread.join(timeout=10)
         server_thread.join(timeout=10)
 
         logger.info("Shutdown completed")
