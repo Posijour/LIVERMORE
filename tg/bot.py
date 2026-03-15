@@ -919,6 +919,30 @@ def _build_application():
     return app
 
 
+
+async def _shutdown_application(app, was_running: bool) -> None:
+    if app.updater is not None and was_running:
+        try:
+            await app.updater.stop()
+            logger.info("Telegram updater stopped")
+        except Exception:
+            logger.exception("Failed to stop Telegram updater cleanly")
+
+    if was_running:
+        try:
+            await app.stop()
+            logger.info("Telegram application stopped")
+        except Exception:
+            logger.exception("Failed to stop Telegram app cleanly")
+
+    try:
+        await app.shutdown()
+        logger.info("Telegram application shutdown completed")
+    except Exception:
+        logger.exception("Failed to shutdown Telegram app cleanly")
+
+
+
 def run_bot(
     stop_event=None,
     on_status: Optional[Callable[[str, Optional[str]], None]] = None,
@@ -938,6 +962,7 @@ def run_bot(
                 break
 
             app = _build_application()
+            app_started = False
 
             try:
                 if on_status:
@@ -945,6 +970,7 @@ def run_bot(
 
                 await app.initialize()
                 await app.start()
+                app_started = True
                 if app.updater is None:
                     raise RuntimeError("Application updater is not initialized")
                 await app.updater.start_polling(drop_pending_updates=False)
@@ -982,22 +1008,10 @@ def run_bot(
                 if on_status:
                     on_status("restarting", str(exc))
             finally:
-                try:
-                    if app.updater is not None:
-                        await app.updater.stop()
-                except Exception:
-                    logger.exception("Failed to stop Telegram updater cleanly")
-                try:
-                    await app.stop()
-                except Exception:
-                    logger.exception("Failed to stop Telegram app cleanly")
-                try:
-                    await app.shutdown()
-                except Exception:
-                    logger.exception("Failed to shutdown Telegram app cleanly")
+                await _shutdown_application(app, was_running=app_started)
 
                 if stop_event is not None and stop_event.is_set():
-                    logger.info("Polling stopped due to shutdown")
+                    logger.info("Telegram bot polling stopped due to shutdown")
                     print("Telegram bot polling stopped.", flush=True)
                     break
 
