@@ -1,7 +1,6 @@
 import asyncio
 import html
 import logging
-import time
 from typing import Callable, Optional
 from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
@@ -926,89 +925,90 @@ def run_bot(
     initial_backoff_seconds: float = 3.0,
     max_backoff_seconds: float = 30.0,
 ):
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    async def _run_bot_async() -> None:
+        nonlocal backoff_seconds
 
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("apscheduler").setLevel(logging.WARNING)
-    logger.info("Starting Telegram bot process")
-
-    backoff_seconds = initial_backoff_seconds
-
-    while True:
-        if stop_event is not None and stop_event.is_set():
-            logger.info("Stop requested before bot startup")
-            if on_status:
-                on_status("stopped", None)
-            break
-
-        app = _build_application()
-
-        try:
-            if on_status:
-                on_status("starting", None)
-
-            app.initialize()
-            app.start()
-            if app.updater is None:
-                raise RuntimeError("Application updater is not initialized")
-            app.updater.start_polling(drop_pending_updates=False)
-            logger.info("Telegram polling started")
-            print("Telegram bot running...", flush=True)
-
-            if on_status:
-                on_status("running", None)
-
-            while True:
-                if stop_event is not None and stop_event.is_set():
-                    logger.info("Stop signal received for Telegram bot")
-                    if on_status:
-                        on_status("stopping", None)
-                    break
-                time.sleep(1)
-
-            backoff_seconds = initial_backoff_seconds
-
+        while True:
             if stop_event is not None and stop_event.is_set():
+                logger.info("Stop requested before bot startup")
                 if on_status:
                     on_status("stopped", None)
                 break
-        except KeyboardInterrupt:
-            logger.info("Bot interrupted by user")
-            if on_status:
-                on_status("stopped", None)
-            break
-        except (TimedOut, NetworkError) as exc:
-            logger.warning("Polling interrupted due to network issue: %s", exc)
-            if on_status:
-                on_status("restarting", str(exc))
-        except Exception as exc:
-            logger.exception("Polling crashed with unexpected error")
-            if on_status:
-                on_status("restarting", str(exc))
-        finally:
-            try:
-                if app.updater is not None:
-                    app.updater.stop()
-            except Exception:
-                logger.exception("Failed to stop Telegram updater cleanly")
-            try:
-                app.stop()
-            except Exception:
-                logger.exception("Failed to stop Telegram app cleanly")
-            try:
-                app.shutdown()
-            except Exception:
-                logger.exception("Failed to shutdown Telegram app cleanly")
 
-            if stop_event is not None and stop_event.is_set():
-                logger.info("Polling stopped due to shutdown")
-                print("Telegram bot polling stopped.", flush=True)
+            app = _build_application()
+
+            try:
+                if on_status:
+                    on_status("starting", None)
+
+                await app.initialize()
+                await app.start()
+                if app.updater is None:
+                    raise RuntimeError("Application updater is not initialized")
+                await app.updater.start_polling(drop_pending_updates=False)
+                logger.info("Telegram polling started")
+                print("Telegram bot running...", flush=True)
+
+                if on_status:
+                    on_status("running", None)
+
+                while True:
+                    if stop_event is not None and stop_event.is_set():
+                        logger.info("Stop signal received for Telegram bot")
+                        if on_status:
+                            on_status("stopping", None)
+                        break
+                    await asyncio.sleep(1)
+
+                backoff_seconds = initial_backoff_seconds
+
+                if stop_event is not None and stop_event.is_set():
+                    if on_status:
+                        on_status("stopped", None)
+                    break
+            except KeyboardInterrupt:
+                logger.info("Bot interrupted by user")
+                if on_status:
+                    on_status("stopped", None)
                 break
+        except (TimedOut, NetworkError) as exc:
+                logger.warning("Polling interrupted due to network issue: %s", exc)
+                if on_status:
+                    on_status("restarting", str(exc))
+            except Exception as exc:
+                logger.exception("Polling crashed with unexpected error")
+                if on_status:
+                    on_status("restarting", str(exc))
+            finally:
+                try:
+                    if app.updater is not None:
+                        await app.updater.stop()
+                except Exception:
+                    logger.exception("Failed to stop Telegram updater cleanly")
+                try:
+                    await app.stop()
+                except Exception:
+                    logger.exception("Failed to stop Telegram app cleanly")
+                try:
+                    await app.shutdown()
+                except Exception:
+                    logger.exception("Failed to shutdown Telegram app cleanly")
 
-            logger.warning("Polling stopped. Restarting in %.1f seconds...", backoff_seconds)
-            print("Telegram bot polling stopped.", flush=True)
-            time.sleep(backoff_seconds)
-            backoff_seconds = min(backoff_seconds * 2, max_backoff_seconds)
+                if stop_event is not None and stop_event.is_set():
+                    logger.info("Polling stopped due to shutdown")
+                    print("Telegram bot polling stopped.", flush=True)
+                    await asyncio.sleep(backoff_seconds)
+                    backoff_seconds = min(backoff_seconds * 2, max_backoff_seconds)
+
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+    
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("apscheduler").setLevel(logging.WARNING)
+        logger.info("Starting Telegram bot process")
+    
+        backoff_seconds = initial_backoff_seconds
+    
+        asyncio.run(_run_bot_async())
