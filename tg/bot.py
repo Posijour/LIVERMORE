@@ -2,6 +2,7 @@ import asyncio
 import html
 import logging
 import time
+from typing import Callable, Optional
 from telegram.error import BadRequest, NetworkError, TimedOut
 from config import DATA_SCOPE
 from trend.dispersion import compute_dispersion
@@ -891,7 +892,40 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- RUN ----------------
 
-def run_bot():
+def _build_application():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler(["info", "information"], info_cmd))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("options", options))
+    app.add_handler(CommandHandler("alerts", alerts))
+    app.add_handler(CommandHandler("event", event))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("context", info_cmd))
+    app.add_handler(CommandHandler("dispersion", dispersion))
+    app.add_handler(MessageHandler(filters.ALL, ensure_started))
+    app.add_handler(CallbackQueryHandler(help_callback))
+    app.add_error_handler(on_error)
+
+    if app.job_queue is None:
+        logger.warning("JobQueue is unavailable; watcher job is disabled")
+    else:
+        app.job_queue.run_repeating(
+            divergence_watcher_job,
+            interval=120,
+            first=10,
+        )
+    return app
+
+
+def run_bot(
+    stop_event=None,
+    on_status: Optional[Callable[[str, Optional[str]], None]] = None,
+    initial_backoff_seconds: float = 3.0,
+    max_backoff_seconds: float = 30.0,
+):
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -901,41 +935,80 @@ def run_bot():
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
     logger.info("Starting Telegram bot process")
 
+    backoff_seconds = initial_backoff_seconds
+
     while True:
-        app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+        if stop_event is not None and stop_event.is_set():
+            logger.info("Stop requested before bot startup")
+            if on_status:
+                on_status("stopped", None)
+            break
 
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("help", help_cmd))
-        app.add_handler(CommandHandler(["info", "information"], info_cmd))
-        app.add_handler(CommandHandler("stats", stats))
-        app.add_handler(CommandHandler("options", options))
-        app.add_handler(CommandHandler("alerts", alerts))
-        app.add_handler(CommandHandler("event", event))
-        app.add_handler(CommandHandler("status", status))
-        app.add_handler(CommandHandler("context", info_cmd))
-        app.add_handler(CommandHandler("dispersion", dispersion))
-        app.add_handler(MessageHandler(filters.ALL, ensure_started))
-        app.add_handler(CallbackQueryHandler(help_callback))
-        app.add_error_handler(on_error)
-
-        # ✅ правильный запуск фонового watcher
-        app.job_queue.run_repeating(
-            divergence_watcher_job,
-            interval=120,
-            first=10,
-        )
-        print("Telegram bot running...", flush=True)
+        app = _build_application()
 
         try:
-            app.run_polling(close_loop=False)
+            if on_status:
+                on_status("starting", None)
+
+            app.initialize()
+            app.start()
+            if app.updater is None:
+                raise RuntimeError("Application updater is not initialized")
+            app.updater.start_polling(drop_pending_updates=False)
+            logger.info("Telegram polling started")
+            print("Telegram bot running...", flush=True)
+
+            if on_status:
+                on_status("running", None)
+
+            while True:
+                if stop_event is not None and stop_event.is_set():
+                    logger.info("Stop signal received for Telegram bot")
+                    if on_status:
+                        on_status("stopping", None)
+                    break
+                time.sleep(1)
+
+            backoff_seconds = initial_backoff_seconds
+
+            if stop_event is not None and stop_event.is_set():
+                if on_status:
+                    on_status("stopped", None)
+                break
         except KeyboardInterrupt:
             logger.info("Bot interrupted by user")
+            if on_status:
+                on_status("stopped", None)
             break
         except (TimedOut, NetworkError) as exc:
             logger.warning("Polling interrupted due to network issue: %s", exc)
-        except Exception:
+            if on_status:
+                on_status("restarting", str(exc))
+        except Exception as exc:
             logger.exception("Polling crashed with unexpected error")
+            if on_status:
+                on_status("restarting", str(exc))
         finally:
-            logger.warning("Polling stopped. Restarting in 5 seconds...")
+            try:
+                if app.updater is not None:
+                    app.updater.stop()
+            except Exception:
+                logger.exception("Failed to stop Telegram updater cleanly")
+            try:
+                app.stop()
+            except Exception:
+                logger.exception("Failed to stop Telegram app cleanly")
+            try:
+                app.shutdown()
+            except Exception:
+                logger.exception("Failed to shutdown Telegram app cleanly")
+
+            if stop_event is not None and stop_event.is_set():
+                logger.info("Polling stopped due to shutdown")
+                print("Telegram bot polling stopped.", flush=True)
+                break
+
+            logger.warning("Polling stopped. Restarting in %.1f seconds...", backoff_seconds)
             print("Telegram bot polling stopped.", flush=True)
-            time.sleep(5)
+            time.sleep(backoff_seconds)
+            backoff_seconds = min(backoff_seconds * 2, max_backoff_seconds)
