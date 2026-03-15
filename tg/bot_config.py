@@ -1,12 +1,15 @@
+import os
+
 MAX_TELEGRAM_TEXT_LEN = 4000
 
-ALERT_COOLDOWN = 30 * 60  # 30 минут
-ANOMALY_ALERT_COOLDOWN = 30 * 60  # 30 минут
-ALERT_CHAT_ID = -1003829481191
+ALERT_COOLDOWN = int(os.getenv("ALERT_COOLDOWN_SECONDS", "1800"))
+ANOMALY_ALERT_COOLDOWN = int(os.getenv("ANOMALY_ALERT_COOLDOWN_SECONDS", "1800"))
 
-TELEGRAM_TOKEN = "8473159744:AAFokOIhOXg9O9qzPYwtTYkdGcROddbToaQ"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
+MAIN_CHAT_ID = int(os.getenv("TELEGRAM_MAIN_CHAT_ID", "0"))
+ALERT_CHAT_ID = int(os.getenv("TELEGRAM_ALERT_CHAT_ID", "0"))
 
-SUPPORTED_TICKERS = {
+_DEFAULT_TICKERS = [
     "BTCUSDT",
     "ETHUSDT",
     "XRPUSDT",
@@ -23,7 +26,16 @@ SUPPORTED_TICKERS = {
     "LTCUSDT",
     "HBARUSDT",
     "ZECUSDT",
-}
+]
+
+
+_tickers_raw = os.getenv("SUPPORTED_TICKERS")
+if _tickers_raw:
+    SUPPORTED_TICKERS = {
+        t.strip().upper() for t in _tickers_raw.split(",") if t.strip()
+    }
+else:
+    SUPPORTED_TICKERS = set(_DEFAULT_TICKERS)
 
 
 def normalize_ticker(raw: str) -> str:
