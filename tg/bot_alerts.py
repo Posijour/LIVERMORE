@@ -63,81 +63,66 @@ def can_send_anomaly(anomaly_key, event_ts):
     return True
 
 
-def detect_buildup_anomalies(alert_rows):
-    buildup_rows = []
+def _pick_first(mapping, *keys):
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, ""):
+            return value
+    return None
 
-    for r in alert_rows:
-        data = r.get("data", {}) or {}
-        if data.get("type") != "BUILDUP":
-            continue
 
-        ts = r.get("ts") or r.get("created_at")
-        symbol = data.get("symbol")
-        direction = data.get("direction")
+def build_anomaly_alert(row):
+    data = row.get("data", {}) or {}
+    if not isinstance(data, dict):
+        data = {}
 
-        if not ts or not symbol:
-            continue
+    event_ts = (
+        row.get("ts")
+        or row.get("created_at")
+        or _pick_first(data, "ts", "timestamp", "time", "created_at", "ts_unix_ms")
+    )
+    event_ts = normalize_event_ts_ms(event_ts)
+    if event_ts is None:
+        return None
 
-        buildup_rows.append({
-            "ts": ts,
-            "symbol": symbol,
-            "direction": direction,
-        })
+    symbol = _pick_first(data, "symbol", "ticker", "asset", "coin", "instrument")
+    anomaly_type = _pick_first(
+        data,
+        "anomaly_type",
+        "type",
+        "kind",
+        "name",
+        "signal_type",
+        "category",
+    )
+    anomaly_id = _pick_first(data, "id", "event_id", "anomaly_id", "signal_id")
+    message = _pick_first(data, "message", "text", "description", "summary")
+    severity = _pick_first(data, "severity", "level", "priority")
 
-    if not buildup_rows:
-        return []
+    key_parts = [str(v).strip() for v in (symbol, anomaly_type, anomaly_id) if v not in (None, "")]
+    anomaly_key = ":".join(key_parts) if key_parts else f"anomaly:{event_ts}"
 
-    for row in buildup_rows:
-        row["ts_ms"] = normalize_event_ts_ms(row["ts"])
+    title = "⚠️ Futures anomaly detected"
+    body_parts = []
 
-    buildup_rows = [r for r in buildup_rows if r["ts_ms"] is not None]
-    buildup_rows.sort(key=lambda x: x["ts_ms"])
+    if symbol and anomaly_type:
+        body_parts.append(f"{symbol} — {anomaly_type}")
+    elif symbol:
+        body_parts.append(str(symbol))
+    elif anomaly_type:
+        body_parts.append(str(anomaly_type))
 
-    anomalies = []
+    if severity:
+        body_parts.append(f"Severity: {severity}")
 
-    per_symbol = {}
-    for row in buildup_rows:
-        per_symbol[row["symbol"]] = per_symbol.get(row["symbol"], 0) + 1
+    if message:
+        body_parts.append(str(message))
 
-    top_symbol = None
-    top_count = 0
-    for symbol, count in per_symbol.items():
-        if count > top_count:
-            top_symbol = symbol
-            top_count = count
+    text = title if not body_parts else title + "\n" + "\n".join(body_parts)
 
-    if top_symbol and top_count >= 3:
-        last_ts = max(r["ts_ms"] for r in buildup_rows if r["symbol"] == top_symbol)
-        anomalies.append({
-            "key": f"REPEATED_BUILDUP:{top_symbol}",
-            "event_ts": last_ts,
-            "text": (
-                "⚠️ Futures anomaly detected\n"
-                f"{top_symbol} — repeated buildups\n"
-                f"Count: {top_count}"
-            ),
-        })
 
-    n = len(buildup_rows)
-    left = 0
-    for right in range(n):
-        while buildup_rows[right]["ts_ms"] - buildup_rows[left]["ts_ms"] > 180000:
-            left += 1
-
-        window = buildup_rows[left:right + 1]
-        if len(window) >= 5:
-            distinct_symbols = {r["symbol"] for r in window}
-            if len(distinct_symbols) >= 3:
-                last_ts = window[-1]["ts_ms"]
-                anomalies.append({
-                    "key": "MULTI_COIN_BUILDUP_BURST",
-                    "event_ts": last_ts,
-                    "text": (
-                        "⚠️ Futures anomaly detected\n"
-                        "Multi-coin buildup burst\n"
-                        f"Events: {len(window)} | Symbols: {len(distinct_symbols)}"
-                    ),
-                })
-                break
-
-    return anomalies
+    return {
+        "key": anomaly_key,
+        "event_ts": event_ts,
+        "text": text,
+    }
