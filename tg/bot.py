@@ -27,7 +27,7 @@ from telegram.ext import (
     filters,
 )
 
-from tg.bot_alerts import can_send_alert, can_send_anomaly, detect_buildup_anomalies
+from tg.bot_alerts import build_anomaly_alert, can_send_alert, can_send_anomaly
 from tg.bot_config import ALERT_CHAT_ID, SUPPORTED_TICKERS, TELEGRAM_TOKEN, normalize_ticker
 from tg.bot_formatting import (
     _extract_iv_slope,
@@ -674,13 +674,15 @@ async def divergence_watcher(app):
     ts_from, ts_to = parse_window_safe("2h")
     rows = await asyncio.to_thread(load_divergence, ts_from, ts_to)
 
-        # ---------- FUTURES ANOMALIES (BUILDUP-BASED) ----------
+        # ---------- FUTURES ANOMALIES (FROM LOGS.EVENT = anomaly) ----------
     a_from, a_to = parse_window_safe("30m")
-    alert_rows = await asyncio.to_thread(load_event, "alert_sent", a_from, a_to)
+    anomaly_rows = await asyncio.to_thread(load_event, "anomaly", a_from, a_to)
 
-    anomalies = detect_buildup_anomalies(alert_rows)
+    for row in anomaly_rows:
+        anomaly = build_anomaly_alert(row)
+        if not anomaly:
+            continue
 
-    for anomaly in anomalies:
         if not can_send_anomaly(anomaly["key"], anomaly["event_ts"]):
             continue
 
