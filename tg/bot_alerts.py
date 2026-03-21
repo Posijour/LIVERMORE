@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import re
 
 from tg.bot_config import ALERT_COOLDOWN, ANOMALY_ALERT_COOLDOWN
 
@@ -71,6 +72,43 @@ def _pick_first(mapping, *keys):
     return None
 
 
+def _normalize_text(value):
+    if value in (None, ""):
+        return ""
+
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(value).lower())
+    return " ".join(normalized.split())
+
+
+def _strip_duplicate_message_lines(message, title, summary_line):
+    if not message:
+        return None
+
+    lines = [line.strip() for line in str(message).splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    title_norm = _normalize_text(title)
+    summary_norm = _normalize_text(summary_line)
+    filtered = []
+
+    for line in lines:
+        line_norm = _normalize_text(line)
+        if not line_norm:
+            continue
+        if line_norm == title_norm:
+            continue
+        if summary_norm and (
+            line_norm == summary_norm
+            or summary_norm in line_norm
+            or line_norm in summary_norm
+        ):
+            continue
+        filtered.append(line)
+
+    return "\n".join(filtered) if filtered else None
+
+
 def build_anomaly_alert(row):
     data = row.get("data", {}) or {}
     if not isinstance(data, dict):
@@ -103,23 +141,28 @@ def build_anomaly_alert(row):
     anomaly_key = ":".join(key_parts) if key_parts else f"anomaly:{event_ts}"
 
     title = "⚠️ Futures anomaly detected"
+    summary_line = None
     body_parts = []
 
     if symbol and anomaly_type:
-        body_parts.append(f"{symbol} — {anomaly_type}")
+        summary_line = f"{symbol} — {anomaly_type}"
     elif symbol:
-        body_parts.append(str(symbol))
+        summary_line = str(symbol)
     elif anomaly_type:
-        body_parts.append(str(anomaly_type))
+        summary_line = str(anomaly_type)
+
+    cleaned_message = _strip_duplicate_message_lines(message, title, summary_line)
+
+    if summary_line:
+        body_parts.append(summary_line)
 
     if severity:
         body_parts.append(f"Severity: {severity}")
 
-    if message:
-        body_parts.append(str(message))
+    if cleaned_message:
+        body_parts.append(cleaned_message)
 
     text = title if not body_parts else title + "\n" + "\n".join(body_parts)
-
 
     return {
         "key": anomaly_key,
